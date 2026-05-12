@@ -1,0 +1,16 @@
+[sudo] password for arduino: === TLMM phandle ===
+TLMM phandle hex: 0x1a (dec: 26)
+Direccion I2C: 0x14 (dec: 20)
+
+=== creando nodo /soc@0/geniqup@4ac0000/i2c@4a80000/gt911@14 ===
+
+=== seteando propiedades ===
+
+=== verificacion (leer de vuelta) ===
+compatible:  goodix,gt911
+reg:         20
+irq-gpios:   26 98 2
+reset-gpios: 26 18 1
+status:      okay
+
+DTB patch DONE. Necesario reboot para que el kernel cargue el cambio.
