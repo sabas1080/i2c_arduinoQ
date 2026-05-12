@@ -11,7 +11,7 @@ El display (DSI-1, 480x800) ya funciona desde Linux gracias al DTB que Arduino p
 
 La causa, confirmada por inspección directa del dispositivo: **GPIO_22/23 pertenecen al bloque CCI (Camera Control Interface)** del QRB2210, un I2C especializado para sensores de cámara que no se expone como `/dev/i2c-N` genérico ni acepta clientes arbitrarios. Su driver (`i2c-qcom-cci`) no está bound porque no hay cámara, así que el bus físicamente no oscila.
 
-Sin embargo, el SoC sí expone un I2C QUP normal libre: **`/dev/i2c-0` = `4a80000.i2c` = controlador qup0**, con `status="okay"` en el DTB activo, pinmux ya configurado, y sin clientes. Físicamente sale por **JMEDIA pin 37 (SOC_GPIO_0_SE0 = SDA)** y **JMEDIA pin 39 (SOC_GPIO_1_SE0 = SCL)** a **1.8V**. El driver `goodix_ts.ko` está disponible como módulo en `/lib/modules/$(uname -r)/kernel/drivers/input/touchscreen/`.
+Sin embargo, el SoC sí expone un I2C QUP normal libre: **`/dev/i2c-0` = `4a80000.i2c` = controlador qup0**, con `status="okay"` en el DTB activo, pinmux ya configurado, y sin clientes. Físicamente sale por **JMEDIA pin 37 (SOC_GPIO_0_SE0 = SCL)** y **JMEDIA pin 39 (SOC_GPIO_1_SE0 = SDA)** a **1.8V** — la asignación SDA/SCL dentro del grupo qup0 va al revés de lo que sugiere el orden del pinmux (verificado empíricamente con osciloscopio: GPIO_0 es el reloj, GPIO_1 los datos). El driver `goodix_ts.ko` está disponible como módulo en `/lib/modules/$(uname -r)/kernel/drivers/input/touchscreen/`.
 
 ## 2. Goals y no-goals
 
@@ -56,8 +56,8 @@ El SoC habla I2C estándar sobre `i2c-0` (qup0, GENI). El level shifter traduce 
 
 | Señal en shield | Conector shield | JMEDIA pin UNO Q | Señal SoC | Voltaje SoC |
 |---|---|---|---|---|
-| SDA touch (D102) | display touch connector | **37** | GPIO_0 (qup0 SDA) | 1.8V |
-| SCL touch (D101) | display touch connector | **39** | GPIO_1 (qup0 SCL) | 1.8V |
+| SCL touch (D101) | display touch connector | **37** | GPIO_0 (qup0 SCL) | 1.8V |
+| SDA touch (D102) | display touch connector | **39** | GPIO_1 (qup0 SDA) | 1.8V |
 | RST touch | display touch connector | **49** | GPIO_18 | 1.8V |
 | INT touch | display touch connector | **46** | GPIO_98 | 1.8V |
 | 3V3 (alimentación shield) | display connector pin 1 | **58** o **60** | +3V3 | — |
