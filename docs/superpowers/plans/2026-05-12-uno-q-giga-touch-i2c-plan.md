@@ -331,8 +331,8 @@ Lado **shield** (GIGA Display Shield ASX00039) — display touch connector:
 - GND
 
 Lado **UNO Q** (ABX00162) — JMEDIA connector:
-- Pin **37**: SOC_GPIO_0_SE0 (SDA)
-- Pin **39**: SOC_GPIO_1_SE0 (SCL)
+- Pin **37**: SOC_GPIO_0_SE0 (SCL) — verificado con osciloscopio: GPIO_0 es el reloj
+- Pin **39**: SOC_GPIO_1_SE0 (SDA) — GPIO_1 son los datos
 - Pin **49**: SOC_GPIO_18 (RST)
 - Pin **46**: SOC_GPIO_98 (INT)
 - Pin **57**: +1V8 (referencia LV del level shifter)
