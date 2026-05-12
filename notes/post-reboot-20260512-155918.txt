@@ -1,0 +1,45 @@
+[sudo] password for arduino: === uptime ===
+ 21:59:23 up 0 min,  1 user,  load average: 2.01, 0.69, 0.24
+
+=== dmesg lineas goodix / 0014 / 4a80000 ===
+[   11.346962] Goodix-TS 0-0014: supply AVDD28 not found, using dummy regulator
+[   11.369733] Goodix-TS 0-0014: supply VDDIO not found, using dummy regulator
+[   11.474830] Goodix-TS 0-0014: ID 911, version: 1060
+[   11.492111] Goodix-TS 0-0014: Direct firmware load for goodix_911_cfg.bin failed with error -2
+[   11.533648] Goodix-TS 0-0014: Invalid config (0, 0, 0), using defaults
+[   11.549120] input: Goodix Capacitive TouchScreen as /devices/platform/soc@0/4ac0000.geniqup/4a80000.i2c/i2c-0/0-0014/input/input2
+[   11.576877] Goodix-TS 0-0014: request IRQ failed: -22
+
+=== /sys/bus/i2c/devices/i2c-0/ contenido ===
+0-0014
+delete_device
+i2c-dev
+name
+new_device
+of_node
+power
+subsystem
+uevent
+
+=== /proc/bus/input/devices Goodix ===
+N: Name="Goodix Capacitive TouchScreen"
+P: Phys=input/ts
+S: Sysfs=/devices/platform/soc@0/4ac0000.geniqup/4a80000.i2c/i2c-0/0-0014/input/input2
+U: Uniq=
+H: Handlers=kbd event2 
+
+=== /dev/input/event* ===
+crw-rw---- 1 root input 13, 64 May 12 21:58 /dev/input/event0
+crw-rw---- 1 root input 13, 65 May 12 21:58 /dev/input/event1
+crw-rw---- 1 root input 13, 66 May 12 21:58 /dev/input/event2
+
+=== i2cdetect 0 ===
+     0  1  2  3  4  5  6  7  8  9  a  b  c  d  e  f
+00:                         -- -- -- -- -- -- -- -- 
+10: -- -- -- -- UU -- -- -- -- -- -- -- -- -- -- -- 
+20: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+30: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+40: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+50: 50 -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+60: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+70: -- -- -- -- -- -- -- --                         
