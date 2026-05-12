@@ -1,0 +1,6 @@
+# Backups binarios grandes
+*.dtb.backup
+*.dtb.bak
+
+# Pero SI queremos versionar las notas de medición
+!notes/
