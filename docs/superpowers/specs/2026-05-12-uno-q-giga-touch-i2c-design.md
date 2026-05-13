@@ -180,3 +180,42 @@ Una vez completada la Fase 4:
 ## 9. Siguiente paso
 
 Tras aprobación de este spec: invocar `writing-plans` para escribir el plan de implementación detallado (cada fase descompuesta en pasos ejecutables con verificación).
+
+---
+
+## 10. Addendum: pivote a userspace daemon (2026-05-13)
+
+Durante la implementación de la Fase 4 (persistencia DTB) descubrimos que **el driver `goodix_ts` del kernel mainline no implementa correctamente el power-on timing del GT911 Rev09**. Específicamente se salta el paso T8 (delay de 6ms entre liberar RST y bajar INT) y T3 (mantener INT LOW por 51ms antes de pasarlo a input). Sin esa secuencia, el chip no carga su config interna desde flash y queda con `0x8047..0x80FE = todo zeros`, INT muteado, sin generar IRQs en toques. Comportamiento "intermitente" (a veces funciona) se debe a estados residuales del chip entre reboots.
+
+Confirmamos vía diagnóstico:
+- Snapshot post-Arduino-reset: config table LLENA, chip pulsando INT a 92Hz (scanning rate normal sin host que ackee)
+- Snapshot post-kernel-reset: config table ZEROS, chip mudo
+- Intento de inyectar config vía `goodix_911_cfg.bin` (firmware blob) no resolvió: el driver escribe la config pero el chip nunca recibe el "trigger" de activación que la secuencia T8+T3 provee
+
+**Pivote:** se reemplaza el camino "driver kernel" por un **daemon userspace en Python**:
+
+| Componente | Ubicación final |
+|---|---|
+| Daemon | `/usr/local/bin/gt911-touch-daemon.py` |
+| systemd unit | `/etc/systemd/system/gt911-touch.service` |
+| Blacklist driver | `/etc/modprobe.d/blacklist-goodix.conf` |
+| Calibración X11 | `/etc/X11/xorg.conf.d/20-goodix-touch.conf` |
+
+Lo que hace el daemon:
+1. Al arrancar: Arduino-style reset vía `gpiod` Python binding sobre `/dev/gpiochip1` (líneas 18 RST, 98 INT)
+2. Polling cada 10ms del registro de status `0x814E` vía `smbus2` sobre `/dev/i2c-0`
+3. Si bit 7 set: lee `0x814F+` (track_id + coords X/Y), escribe ACK (`0x814E=0`)
+4. Inyecta eventos multitouch a `/dev/uinput` vía `python3-evdev` con device name "Goodix Capacitive TouchScreen (userspace daemon)"
+
+El resultado funcional es idéntico al del driver kernel: apps Linux (X11/Weston/LVGL) ven un evdev multitouch estándar. Validado con `evtest` y X11 cursor following.
+
+**Trade-offs vs kernel driver:**
+- (+) No depende del kernel driver con bug
+- (+) Bypassa el "stationary configuration" del chip (no se "fija" config mala)
+- (+) Resilient: si chip queda en estado raro, daemon hace Arduino-reset en restart automático
+- (+) Configurable / hackable en Python
+- (−) Polling 10ms vs IRQ-driven (latencia ~5ms peor, CPU usage marginal)
+- (−) Proceso userspace en vez de kernel module
+- (−) Requiere python3-evdev + python3-smbus2 + python3-libgpiod instalados
+
+**Follow-up potencial:** parchar `drivers/input/touchscreen/goodix.c` para añadir el T8+T3 timing y enviar upstream. Resolvería el bug de raíz pero requiere mantener un fork/DKMS para esta imagen. Spec separado.
