@@ -1,0 +1,25 @@
+[Unit]
+Description=Goodix GT911 touchscreen userspace daemon (GIGA Display Shield on UNO Q)
+Documentation=https://github.com/electroniccats/...
+After=systemd-modules-load.service
+Wants=systemd-modules-load.service
+Before=display-manager.service graphical.target
+
+[Service]
+Type=simple
+# El daemon hace Arduino-style reset al chip + I2C polling + uinput.
+# Reemplaza al kernel driver `goodix_ts` (cuya secuencia de reset deja al chip mudo).
+ExecStartPre=-/bin/sh -c 'echo 0-0014 > /sys/bus/i2c/drivers/Goodix-TS/unbind 2>/dev/null || true'
+ExecStart=/usr/local/bin/gt911-touch-daemon.py
+Restart=on-failure
+RestartSec=2
+StandardOutput=journal
+StandardError=journal
+
+# El daemon necesita escribir a /dev/uinput y /dev/i2c-0 y /dev/gpiochip1.
+# Corre como root por simplicidad.
+User=root
+Group=root
+
+[Install]
+WantedBy=multi-user.target
