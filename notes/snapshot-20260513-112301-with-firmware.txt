@@ -1,0 +1,108 @@
+==== SNAPSHOT: with-firmware ====
+Timestamp: 2026-05-13T17:23:02+00:00
+Uptime:  17:23:02 up 0 min,  1 user,  load average: 2.18, 0.66, 0.23
+
+==== [1] DRIVER STATE ====
+i2c-0 children:
+0-0014
+delete_device
+i2c-dev
+name
+new_device
+of_node
+power
+subsystem
+uevent
+
+Driver bound al cliente 0-0014:
+../../../../../../../bus/i2c/drivers/Goodix-TS
+
+i2cdetect bus 0:
+     0  1  2  3  4  5  6  7  8  9  a  b  c  d  e  f
+00:                         -- -- -- -- -- -- -- -- 
+10: -- -- -- -- UU -- -- -- -- -- -- -- -- -- -- -- 
+20: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+30: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+40: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+50: 50 -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+60: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+70: -- -- -- -- -- -- -- --                         
+
+==== [2] /proc/interrupts ====
+136:          0          0          0          0  msmgpio  98 Edge      gt911
+
+==== [3] dmesg (goodix/0-0014/hwirq) ====
+[   11.152704] Goodix-TS 0-0014: supply AVDD28 not found, using dummy regulator
+[   11.163079] Goodix-TS 0-0014: supply VDDIO not found, using dummy regulator
+[   11.288871] Goodix-TS 0-0014: ID 911, version: 1060
+[   11.363680] input: Goodix Capacitive TouchScreen as /devices/platform/soc@0/4ac0000.geniqup/4a80000.i2c/i2c-0/0-0014/input/input2
+
+==== [4] xorg.conf.d ====
+total 16
+drwxr-xr-x 2 root root 4096 May 12 23:27 .
+drwxr-xr-x 8 root root 4096 Oct  6  2025 ..
+-rw-r--r-- 1 root root  287 May  5 21:19 10-monitor.conf
+-rw-r--r-- 1 root root  511 May 12 23:27 20-goodix-touch.conf
+# Calibracion empirica del touch GT911 sobre display DSI-1 rotado "right"
+# Derivada de capturar las 4 esquinas con evtest:
+#   UL raw(400,70)  UR raw(405,750)  LR raw(25,735)  LL raw(35,45)
+# Mapeo: norm_screen_X = 5.98*norm_in_y - 0.083
+#        norm_screen_Y = -11.0*norm_in_x + 1.081
+Section "InputClass"
+    Identifier "Goodix Touch Calibration"
+    MatchProduct "Goodix Capacitive TouchScreen"
+    MatchIsTouchscreen "true"
+    Option "TransformationMatrix" "0 5.98 -0.083 -11.0 0 1.081 0 0 1"
+EndSection
+
+==== [5] UNBIND para leer chip raw ====
+0-0014
+i2cdetect bus 0 tras unbind:
+     0  1  2  3  4  5  6  7  8  9  a  b  c  d  e  f
+00:                         -- -- -- -- -- -- -- -- 
+10: -- -- -- -- 14 -- -- -- -- -- -- -- -- -- -- -- 
+20: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+30: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+40: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+50: 50 -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+60: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+70: -- -- -- -- -- -- -- --                         
+
+==== [6] Chip Product ID (0x8140-0x8146) ====
+0x39 0x31 0x31 0x00 0x60 0x10 0x00
+
+==== [7] Status 0x814E ====
+0x00
+
+==== [8] Touch point 1 (0x8150-0x8157) ====
+0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00
+
+==== [9] Config table COMPLETA 0x8047-0x80FE ====
+  0x800x47: 0x41 0xe0 0x01 0x20 0x03 0x0a 0x05 0x00 0x01 0x08 0x28 0x05 0x50 0x32 0x03 0x05 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x86 0x26 0x07 0x17 0x15
+  0x800x67: 0x31 0x0d 0x00 0x00 0x01 0x9b 0x03 0x1d 0x00 0x00 0x00 0x00 0x00 0x03 0x64 0x32 0x00 0x00 0x00 0x0f 0x4b 0x94 0xc5 0x02 0x07 0x00 0x00 0x04 0x9c 0x11 0x00 0x72
+  0x800x87: 0x18 0x00 0x55 0x21 0x00 0x41 0x2e 0x00 0x32 0x40 0x00 0x32 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00
+  0x800xa7: 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x12 0x10 0x0e 0x0c 0x0a 0x08 0x06 0xff 0xff 0xff 0xff 0xff 0xff 0xff 0x00 0x00
+  0x800xc7: 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x22 0x21 0x20 0x1f 0x1e 0x1d 0x00 0x02 0x04 0x06 0x08 0x0a 0xff 0xff 0xff 0xff 0xff 0xff
+  0x800xe7: 0xff 0xff 0xff 0xff 0xff 0xff 0xff 0xff 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0xe0 0x01 0x00 0x00 0x00 0x00 0x00 0x00
+  Checksum byte (0x80FF):
+0xe0
+  Config update flag (0x8100):
+0x01
+
+==== [10] gpiomon GPIO_98 (5s) ====
+Capturando flancos descendentes en INT durante 5s (no toques pantalla):
+
+Total flancos en 5s:
+0
+0
+
+==== [11] Intentar rebind ====
+0-0014
+Resultado dmesg:
+[   33.764566] l16: disabling
+[   60.988257] Goodix-TS 0-0014: supply AVDD28 not found, using dummy regulator
+[   60.995736] Goodix-TS 0-0014: supply VDDIO not found, using dummy regulator
+[   61.100224] Goodix-TS 0-0014: ID 911, version: 1060
+[   61.153661] input: Goodix Capacitive TouchScreen as /devices/platform/soc@0/4ac0000.geniqup/4a80000.i2c/i2c-0/0-0014/input/input4
+
+==== FIN SNAPSHOT ====

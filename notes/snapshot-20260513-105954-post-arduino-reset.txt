@@ -1,0 +1,142 @@
+==== SNAPSHOT: post-arduino-reset ====
+Timestamp: 2026-05-13T16:59:58+00:00
+Uptime:  16:59:58 up 17:25,  1 user,  load average: 0.00, 0.03, 0.05
+
+==== [1] DRIVER STATE ====
+i2c-0 children:
+0-0014
+delete_device
+i2c-dev
+name
+new_device
+of_node
+power
+subsystem
+uevent
+
+Driver bound al cliente 0-0014:
+
+i2cdetect bus 0:
+     0  1  2  3  4  5  6  7  8  9  a  b  c  d  e  f
+00:                         -- -- -- -- -- -- -- -- 
+10: -- -- -- -- 14 -- -- -- -- -- -- -- -- -- -- -- 
+20: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+30: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+40: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+50: 50 -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+60: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+70: -- -- -- -- -- -- -- --                         
+
+==== [2] /proc/interrupts ====
+NO gt911 IRQ
+
+==== [3] dmesg (goodix/0-0014/hwirq) ====
+[   11.239291] Goodix-TS 0-0014: supply AVDD28 not found, using dummy regulator
+[   11.252418] Goodix-TS 0-0014: supply VDDIO not found, using dummy regulator
+[   11.363807] Goodix-TS 0-0014: ID 911, version: 1060
+[   11.369953] Goodix-TS 0-0014: Direct firmware load for goodix_911_cfg.bin failed with error -2
+[   11.404445] Goodix-TS 0-0014: Invalid config (0, 0, 0), using defaults
+[   11.447111] input: Goodix Capacitive TouchScreen as /devices/platform/soc@0/4ac0000.geniqup/4a80000.i2c/i2c-0/0-0014/input/input2
+[62016.121267] irq: type mismatch, failed to map hwirq-98 for pinctrl@500000!
+[62016.128430] Goodix-TS 0-0014: supply AVDD28 not found, using dummy regulator
+[62016.135818] Goodix-TS 0-0014: supply VDDIO not found, using dummy regulator
+[62016.241056] Goodix-TS 0-0014: ID 911, version: 1060
+[62016.247413] Goodix-TS 0-0014: Direct firmware load for goodix_911_cfg.bin failed with error -2
+[62016.277400] Goodix-TS 0-0014: Invalid config (0, 0, 0), using defaults
+[62016.284354] input: Goodix Capacitive TouchScreen as /devices/platform/soc@0/4ac0000.geniqup/4a80000.i2c/i2c-0/0-0014/input/input4
+[62016.297035] Goodix-TS 0-0014: request IRQ failed: -22
+
+==== [4] xorg.conf.d ====
+total 16
+drwxr-xr-x 2 root root 4096 May 12 23:27 .
+drwxr-xr-x 8 root root 4096 Oct  6  2025 ..
+-rw-r--r-- 1 root root  287 May  5 21:19 10-monitor.conf
+-rw-r--r-- 1 root root  511 May 12 23:27 20-goodix-touch.conf
+# Calibracion empirica del touch GT911 sobre display DSI-1 rotado "right"
+# Derivada de capturar las 4 esquinas con evtest:
+#   UL raw(400,70)  UR raw(405,750)  LR raw(25,735)  LL raw(35,45)
+# Mapeo: norm_screen_X = 5.98*norm_in_y - 0.083
+#        norm_screen_Y = -11.0*norm_in_x + 1.081
+Section "InputClass"
+    Identifier "Goodix Touch Calibration"
+    MatchProduct "Goodix Capacitive TouchScreen"
+    MatchIsTouchscreen "true"
+    Option "TransformationMatrix" "0 5.98 -0.083 -11.0 0 1.081 0 0 1"
+EndSection
+
+==== [5] UNBIND para leer chip raw ====
+0-0014
+tee: /sys/bus/i2c/drivers/Goodix-TS/unbind: No such device
+i2cdetect bus 0 tras unbind:
+     0  1  2  3  4  5  6  7  8  9  a  b  c  d  e  f
+00:                         -- -- -- -- -- -- -- -- 
+10: -- -- -- -- 14 -- -- -- -- -- -- -- -- -- -- -- 
+20: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+30: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+40: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+50: 50 -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+60: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+70: -- -- -- -- -- -- -- --                         
+
+==== [6] Chip Product ID (0x8140-0x8146) ====
+0x39 0x31 0x31 0x00 0x60 0x10 0xe0
+
+==== [7] Status 0x814E ====
+0x80
+
+==== [8] Touch point 1 (0x8150-0x8157) ====
+0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00
+
+==== [9] Config table COMPLETA 0x8047-0x80FE ====
+  0x800x47: 0x41 0xe0 0x01 0x20 0x03 0x0a 0x05 0x00 0x01 0x08 0x28 0x05 0x50 0x32 0x03 0x05 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x86 0x26 0x07 0x17 0x15
+  0x800x67: 0x31 0x0d 0x00 0x00 0x01 0x9b 0x03 0x1d 0x00 0x00 0x00 0x00 0x00 0x03 0x64 0x32 0x00 0x00 0x00 0x0f 0x4b 0x94 0xc5 0x02 0x07 0x00 0x00 0x04 0x9c 0x11 0x00 0x72
+  0x800x87: 0x18 0x00 0x55 0x21 0x00 0x41 0x2e 0x00 0x32 0x40 0x00 0x32 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00
+  0x800xa7: 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x12 0x10 0x0e 0x0c 0x0a 0x08 0x06 0xff 0xff 0xff 0xff 0xff 0xff 0xff 0x00 0x00
+  0x800xc7: 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x22 0x21 0x20 0x1f 0x1e 0x1d 0x00 0x02 0x04 0x06 0x08 0x0a 0xff 0xff 0xff 0xff 0xff 0xff
+  0x800xe7: 0xff 0xff 0xff 0xff 0xff 0xff 0xff 0xff 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0xe0 0x00 0x00 0x00 0x00 0x00 0x00 0x00
+  Checksum byte (0x80FF):
+0xe0
+  Config update flag (0x8100):
+0x00
+
+==== [10] gpiomon GPIO_98 (5s) ====
+Capturando flancos descendentes en INT durante 5s (no toques pantalla):
+62760.548981619	falling	gpiochip1 98
+62760.550812035	falling	gpiochip1 98
+62760.591099680	falling	gpiochip1 98
+62760.631134252	falling	gpiochip1 98
+62760.671338771	falling	gpiochip1 98
+62760.711312041	falling	gpiochip1 98
+62760.751337185	falling	gpiochip1 98
+62760.791462486	falling	gpiochip1 98
+62760.831489557	falling	gpiochip1 98
+62760.871623244	falling	gpiochip1 98
+62760.911640888	falling	gpiochip1 98
+62760.951762595	falling	gpiochip1 98
+62760.991822011	falling	gpiochip1 98
+62761.031880853	falling	gpiochip1 98
+62761.071944956	falling	gpiochip1 98
+62761.111938121	falling	gpiochip1 98
+62761.152055922	falling	gpiochip1 98
+62761.192138775	falling	gpiochip1 98
+62761.232203608	falling	gpiochip1 98
+62761.272276825	falling	gpiochip1 98
+62761.312342022	falling	gpiochip1 98
+62761.352425709	falling	gpiochip1 98
+62761.392502729	falling	gpiochip1 98
+62761.432510269	falling	gpiochip1 98
+62761.472630518	falling	gpiochip1 98
+
+Total flancos en 5s:
+124
+
+==== [11] Intentar rebind ====
+0-0014
+Resultado dmesg:
+[62766.455086] Goodix-TS 0-0014: supply VDDIO not found, using dummy regulator
+[62766.559369] Goodix-TS 0-0014: ID 911, version: 1060
+[62766.565556] Goodix-TS 0-0014: Direct firmware load for goodix_911_cfg.bin failed with error -2
+[62766.592859] Goodix-TS 0-0014: Invalid config (0, 0, 0), using defaults
+[62766.599826] input: Goodix Capacitive TouchScreen as /devices/platform/soc@0/4ac0000.geniqup/4a80000.i2c/i2c-0/0-0014/input/input6
+
+==== FIN SNAPSHOT ====
