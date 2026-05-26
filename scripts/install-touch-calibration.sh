@@ -13,17 +13,23 @@ echo "$SSHPASS_REMOTE" | sudo -S -v
 TMP=$(mktemp)
 cat > "$TMP" <<XORGEOF
 # Calibracion empirica del touch GT911 sobre display DSI-1 rotado "right"
-# Derivada de capturar las 4 esquinas con evtest:
+# Derivada de capturar las 4 esquinas con evtest (notes/calibration-corners-*.txt):
 #   UL raw(400,70)  UR raw(405,750)  LR raw(25,735)  LL raw(35,45)
-# Mapeo: norm_screen_X =  5.98 * norm_in_y - 0.083
-#        norm_screen_Y = -11.0 * norm_in_x + 1.081
-# Los coeficientes son grandes porque el driver reporta abs-max 4095 pero el
-# chip solo usa hasta ~480 X / ~800 Y.
+#
+# IMPORTANTE: estos coeficientes son los CORRECTOS para el daemon Plan A
+# (abs_max=479/799, resolucion real del chip). La version anterior usaba
+# 5.98 y -11.0 porque fue calibrada cuando el kernel driver reportaba
+# abs_max=4095 (default cuando la config era invalida). Esa version causa
+# que el cursor solo se mueva en una franja pequena si se aplica al daemon.
+#
+# Mapeo panel rotado "right":
+#   screen_x_norm =  1.175 * (raw_y / 799) - 0.103
+#   screen_y_norm = -1.312 * (raw_x / 479) + 1.096
 Section "InputClass"
     Identifier "Goodix Touch Calibration"
     MatchProduct "Goodix Capacitive TouchScreen"
     MatchIsTouchscreen "true"
-    Option "TransformationMatrix" "0 5.98 -0.083 -11.0 0 1.081 0 0 1"
+    Option "TransformationMatrix" "0 1.175 -0.103 -1.312 0 1.096 0 0 1"
 EndSection
 XORGEOF
 
