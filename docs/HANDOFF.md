@@ -1,8 +1,10 @@
 # Handoff — GT911 Touch en Arduino UNO Q + GIGA Display Shield
 
-**Fecha:** 2026-05-13
+**Fecha:** 2026-05-13 (original) · **actualizado 2026-05-26**
 **Sesión previa:** Claude Opus 4.7 (1M context)
-**Estado:** Plan A completo y funcionando. Plan B (kernel patch) pendiente.
+**Estado:** Plan A completo y funcionando. Plan B (kernel patch) **CORREGIDO** — la hipótesis original de "T8 missing" se verificó FALSA. El bug real está sin localizar y requiere debug con osciloscopio.
+
+> ⚠️ **Nota 2026-05-26:** Las secciones §5 y §6 de este documento contenían un diagnóstico equivocado del bug del kernel driver. **No se borraron** (quedan como contexto histórico) pero ver §11 al final para la versión corregida tras los experimentos de esta sesión.
 
 ---
 
@@ -235,4 +237,101 @@ Resultado esperado:
 
 ---
 
-Fin del handoff. Cualquier pregunta de continuación queda en el repo git (commits anteriores tienen el razonamiento completo de cada paso).
+Fin del handoff original (2026-05-13). Continúa abajo con la corrección de 2026-05-26.
+
+---
+
+## 11. Corrección 2026-05-26 — T8 NO es el bug, diagnóstico abierto
+
+Sesión de retomar: Plan B intentado vía cross-compile en PC. Resumen de hallazgos que **corrigen las secciones §5 y §6 de este documento**.
+
+### 11.1 T8 ya está en el árbol Arduino — la hipótesis original era incorrecta
+
+El kernel `6.16.7-g0dd6551ae96b` corresponde al commit `0dd6551ae96b78024086e72339fefbef6fcc604b` en la rama `qcom-v6.16.7-unoq` del repo `arduino/linux-qcom`. En `drivers/input/touchscreen/goodix.c:771`:
+
+```c
+usleep_range(6000, 10000);		/* T4: > 5ms */
+```
+
+El kernel lo llama **T4** en su comentario pero es exactamente la ventana T8 (≥6 ms tras `RST=1` antes de bajar INT) que el HANDOFF original (§5) afirmaba que el kernel omitía. **Está, y desde hace mucho.** La cadena completa kernel → `goodix_reset()` → `goodix_reset_no_int_sync()` (deja RST high, hace el T8 wait) → `goodix_int_sync()` (INT=0, msleep(50)=T5, INT=input) coincide en estructura con la secuencia Arduino-style del datasheet.
+
+### 11.2 Síntoma real observado
+
+Con el driver kernel bound (original o parchado) y los GPIOs en posesión del kernel:
+- Chip responde a I2C (lee `ID 911, version 1060`) ✓
+- Sus registros de config `0x8047..0x80FE` quedan en **zeros** después del reset del kernel — el chip NO auto-carga su flash interna ✗
+- Si el host (driver) escribe la config (vía `goodix_911_cfg.bin`), los bytes llegan a los registros, pero el flag `config_fresh` en `0x8100` **se queda en `0x01`** — el chip nunca procesa el reload ✗
+- `/proc/interrupts` cuenta **0 IRQs** al tocar la pantalla ✗
+
+Mientras tanto, el daemon Plan A (que hace el reset Arduino-style vía `libgpiod` directo sobre `/dev/gpiochip1`):
+- Mismo timing nominal (T2, T7, T8, T5 dentro de spec en ambos paths)
+- Después del reset, los registros del chip tienen config completa, `0x8100 = 0x00`, y el chip escanea normalmente
+
+Comparado byte-a-byte el `notes/snapshot-20260513-105954-post-arduino-reset.txt` (estado tras reset del daemon, working) vs el `notes/snapshot-20260513-112301-with-firmware.txt` (estado tras reset del kernel + escritura de blob, no working): los **184 bytes de config son idénticos**, solo difiere `0x8100` (00 vs 01).
+
+### 11.3 Patches intentados en esta sesión (todos fallidos)
+
+Cross-compile en PC sobre el commit exacto del kernel running, vermagic ajustado, deploy via SCP a `/lib/modules/$(uname -r)/kernel/drivers/input/touchscreen/goodix_ts.ko`:
+
+| Patch | Hipótesis | Resultado |
+|---|---|---|
+| v1 | Falta `goodix_irq_direction_output(ts, 0)` inmediatamente después de `RST=0` y antes del `msleep(20)` (forzar INT low durante T2 como hace explícitamente el daemon) | Chip sigue sin auto-cargar config; `config_fresh=1` se queda; 0 IRQs |
+| v2 (sobre v1) | También skipear la rama `gpiod_direction_input(ts->gpiod_rst)` al final de `goodix_reset_no_int_sync` (mantener RST como OUTPUT HIGH, como hace el daemon antes de release) | **PEOR**: chip deja de responder a I2C (`-6 ENXIO`) |
+
+Commit local con el patch v1 (para referencia): tag `e7189f57168c` en `arduino/linux-qcom` branch `qcom-v6.16.7-unoq`. El árbol cross-compile vive en mi PC en `~/Documents/electroniccats/linux-qcom-build/linux-qcom/`.
+
+### 11.4 Estado del entendimiento (al cerrar esta sesión)
+
+Empíricamente: existe una diferencia entre la secuencia GPIO ejecutada por `gpiod_direction_output()` desde el kernel (que pasa por `pinctrl-msm` + el driver de gpio del SoC) vs `libgpiod` desde userspace (`/dev/gpiochip1` → ioctls al mismo subsistema kernel). Ambos teóricamente deberían producir las mismas transiciones eléctricas, pero **empíricamente solo el path userspace logra que el chip GT911 entre en modo normal y auto-cargue su flash**.
+
+Posibles causas todavía no descartadas (require osciloscopio o instrumentación más fina):
+- Glitch transitorio en INT o RST entre operaciones GPIO consecutivas del kernel
+- Algún paso del pinctrl-msm (mux/drive-strength/bias config) que reconfigura el pin de forma sutil cuando el kernel reclama el GPIO
+- Una diferencia microsegundo-temprana en cuándo INT/RST cambian relativo a algún reloj interno del SoC
+
+### 11.5 Verificación rápida de que Plan A sigue funcionando
+
+```bash
+export SSHPASS='arduino1334'
+./scripts/remote-ssh.sh 'systemctl is-active gt911-touch.service'
+./scripts/remote-ssh.sh 'timeout 5 evtest /dev/input/event2 | grep ABS_MT_POSITION'
+```
+
+Esperado: service `active`, eventos `ABS_MT_POSITION_X/Y` al tocar.
+
+### 11.6 Calibración X11 corregida (también)
+
+La matriz original de `scripts/install-touch-calibration.sh` (`0 5.98 -0.083 -11.0 0 1.081 0 0 1`) fue derivada en una etapa cuando el kernel driver con config inválida reportaba `abs_max=4095`. El daemon Plan A reporta `abs_max=479/799` (la resolución real del chip), así que los coeficientes deben ser ~5x/~8x más pequeños. Matriz **correcta** para el daemon:
+
+```
+TransformationMatrix "0 1.175 -0.103 -1.312 0 1.096 0 0 1"
+```
+
+`scripts/install-touch-calibration.sh` ya está actualizado.
+
+### 11.7 Estado de los archivos en el UNO Q (tras esta sesión)
+
+| Path | Estado | Notas |
+|---|---|---|
+| `/usr/local/bin/gt911-touch-daemon.py` | Original (sobrevivió reflash) | — |
+| `/etc/systemd/system/gt911-touch.service` | Original (sobrevivió reflash), enabled+active | — |
+| `/etc/modprobe.d/blacklist-goodix.conf` | **Re-creado** | Se había perdido en reflash |
+| `/etc/X11/xorg.conf.d/20-goodix-touch.conf` | **Re-creado con matriz CORREGIDA** | — |
+| `/lib/firmware/goodix_911_cfg.bin` | Presente | Inofensivo con blacklist; útil si se reintenta path kernel |
+| `/lib/modules/.../goodix_ts.ko` | Original Arduino (md5 `f7dba424...`) | El parchado fue restaurado al backup tras experimentos |
+| `/lib/modules/.../goodix_ts.ko.original` | Backup del original | Se puede borrar después de validar todo |
+| `~arduino/kernel-source` (2 GB), `~arduino/compiling_goodix` (260 K) | Leftovers del equipo de soporte | No afectan runtime; borrar cuando se quiera liberar disco |
+
+### 11.8 Cambios en este repo (commit de esta sesión)
+
+- `scripts/install-touch-calibration.sh` — matriz corregida + comentario explicando la corrección
+- `docs/HANDOFF.md` — esta sección §11 + nota de advertencia al inicio
+
+### 11.9 Próximos pasos sugeridos para retomar Plan B
+
+1. **Instrumentar con osciloscopio** RST + INT + SDA durante el reset del kernel-driver, comparar contra el reset del daemon. Buscar diferencia de timing del orden de microsegundos o niveles de voltaje transitorios.
+2. Probar deshabilitando `pinctrl-msm` para los pines GPIO_18 / GPIO_98 antes de que el kernel driver intente reclamarlos.
+3. Probar un patch que use directamente las APIs de bajo nivel `pinctrl_*` en vez de `gpiod_*` (esquiva la capa de abstracción).
+4. Considerar reportar el bug a `linux-input@vger.kernel.org` con los datos empíricos como issue contra el driver `goodix` cuando se usa con boards que no tienen pull-up fuerte en RST y/o gpio controllers MSM.
+
+El árbol cross-compile en `~/Documents/electroniccats/linux-qcom-build/linux-qcom/` ya tiene el commit `e7189f57168c` aplicado y vmlinux + Module.symvers construidos — recompilar el módulo es rápido para futuras iteraciones.

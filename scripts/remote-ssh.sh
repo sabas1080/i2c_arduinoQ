@@ -16,7 +16,7 @@ if ! command -v sshpass >/dev/null; then
   exit 2
 fi
 
-HOST="arduino@192.168.0.105"
+HOST="arduino@192.168.0.184"
 SSH_OPTS="-o StrictHostKeyChecking=accept-new -o ConnectTimeout=10"
 
 if [[ $# -gt 0 ]]; then
