@@ -1,10 +1,10 @@
 # Handoff — GT911 Touch en Arduino UNO Q + GIGA Display Shield
 
-**Fecha:** 2026-05-13 (original) · **actualizado 2026-05-26**
+**Fecha:** 2026-05-13 (original) · **actualizado 2026-05-26 (DOS VECES)**
 **Sesión previa:** Claude Opus 4.7 (1M context)
-**Estado:** Plan A completo y funcionando. Plan B (kernel patch) **CORREGIDO** — la hipótesis original de "T8 missing" se verificó FALSA. El bug real está sin localizar y requiere debug con osciloscopio.
+**Estado:** **PLAN B RESUELTO.** El kernel driver Arduino-original funciona correctamente con el DTB CORREGIDO. No se necesita ningún patch al código C. Plan A daemon queda como fallback opcional.
 
-> ⚠️ **Nota 2026-05-26:** Las secciones §5 y §6 de este documento contenían un diagnóstico equivocado del bug del kernel driver. **No se borraron** (quedan como contexto histórico) pero ver §11 al final para la versión corregida tras los experimentos de esta sesión.
+> ⚠️ **Nota IMPORTANTE 2026-05-26:** Las secciones §5, §6 y §11 contienen diagnósticos PARCIALMENTE INCORRECTOS (no fueron borrados — quedan como contexto histórico). **El bug real está documentado en §12 al final**. Resumen ejecutivo: el bug NO era T8 (§5/§6) NI un problema de pinctrl-msm (§11) — eran simplemente los **GPIO flags del DTB invertidos** que el script `patch-dtb.sh` setea. Una vez corregidos, el driver kernel `goodix_ts` upstream funciona out-of-the-box.
 
 ---
 
@@ -335,3 +335,95 @@ TransformationMatrix "0 1.175 -0.103 -1.312 0 1.096 0 0 1"
 4. Considerar reportar el bug a `linux-input@vger.kernel.org` con los datos empíricos como issue contra el driver `goodix` cuando se usa con boards que no tienen pull-up fuerte en RST y/o gpio controllers MSM.
 
 El árbol cross-compile en `~/Documents/electroniccats/linux-qcom-build/linux-qcom/` ya tiene el commit `e7189f57168c` aplicado y vmlinux + Module.symvers construidos — recompilar el módulo es rápido para futuras iteraciones.
+
+---
+
+## 12. Resolución 2026-05-26 (segunda parte) — Plan B funciona: el bug era el DTB
+
+Después de descartar T8 (§11) y de fracasar con patches v1/v2 al código C, una comparación con DTs upstream reveló el problema real. **No es ningún bug en el código kernel — es un bug en `scripts/patch-dtb.sh` que inyectó los GPIO flags al revés.**
+
+### 12.1 El bug
+
+`scripts/patch-dtb.sh` (versión original) asignaba estos flags:
+
+```
+RST_FLAG=1    # GPIO_ACTIVE_LOW
+IRQ_FLAG=2    # OOPS: este era IRQ_TYPE_EDGE_FALLING para interrupts-extended
+              # pero se REUTILIZÓ para irq-gpios donde 2 significa GPIO_OPEN_DRAIN
+```
+
+Y el script aplicaba `RST_FLAG=1` (`GPIO_ACTIVE_LOW`) a `reset-gpios` y `IRQ_FLAG=2` (`GPIO_OPEN_DRAIN`) a `irq-gpios`.
+
+**Verificación contra árbol upstream:** los tres DTs upstream con `goodix,gt911` usan `GPIO_ACTIVE_HIGH` (=0) para ambos:
+- `arch/arm/boot/dts/nxp/imx/imx6q-kp.dtsi`: `reset-gpios = <&gpio5 2 GPIO_ACTIVE_HIGH>; irq-gpios = <&gpio1 9 GPIO_ACTIVE_HIGH>;`
+- `arch/arm64/boot/dts/rockchip/rk3399-rockpro64.dtsi`: idem ambos `GPIO_ACTIVE_HIGH`
+- `arch/arm/boot/dts/st/stm32mp135f-dk.dts`: idem
+
+El driver `goodix.c` ejecuta `gpiod_direction_output(rst, 0)` esperando que se traduzca a **físico LOW** (chip en reset). Con `GPIO_ACTIVE_HIGH` (convención upstream), eso es lo que pasa. Con nuestro `GPIO_ACTIVE_LOW`, la API de gpiod inverte la polaridad y `(rst, 0)` resulta en **físico HIGH** — chip NO entra en reset.
+
+Resultado de la secuencia con DT mal:
+1. `gpiod_direction_output(rst, 0)` → RST físico HIGH (no reset)
+2. `msleep(20)` con RST HIGH (chip está corriendo normalmente, no en reset)
+3. INT manipulation con chip ya corriendo (no entra en boot-mode select)
+4. `gpiod_direction_output(rst, 1)` → RST físico LOW (chip recién ahora entra en reset)
+5. `usleep_range(6000, 10000)` chip está reseteado solo 6-10ms (datasheet pide ≥11ms inicial)
+6. `gpiod_direction_input(rst)` → RST se suelta a high-Z, sube → chip arranca
+
+El chip queda en estado raro: sí responde a I2C, pero su engine de scan nunca arrancó porque la secuencia de address-select via INT pasó cuando el chip ya estaba corriendo (no en boot).
+
+`irq-gpios` con `GPIO_OPEN_DRAIN` también contribuye: cuando el driver hace `goodix_irq_direction_output(int, 1)` para drive HIGH, con OPEN_DRAIN solo "libera" el pin (relies on pull-up externo) en vez de drive activo HIGH.
+
+### 12.2 Por qué el daemon Plan A sí funcionaba
+
+`libgpiod` desde userspace NO lee los flags del Device Tree. Toma sus propias decisiones de polaridad y drive mode basado en `LineSettings`. El daemon especificaba `Direction.OUTPUT` y `Value.ACTIVE/INACTIVE` sin flag de inversión → control directo físico:
+- `Value.INACTIVE` = físico LOW
+- `Value.ACTIVE` = físico HIGH
+
+Por eso el daemon "sabía" lo que estaba haciendo a nivel hardware mientras el kernel driver se comía la mentira del DT.
+
+### 12.3 El fix
+
+`scripts/patch-dtb.sh` ahora separa el IRQ trigger flag (para `interrupts-extended`) del GPIO polarity flag (para `irq-gpios`/`reset-gpios`):
+
+```
+IRQ_TRIGGER_FLAG=2   # IRQ_TYPE_EDGE_FALLING (cell de interrupts)
+GPIO_FLAG=0          # GPIO_ACTIVE_HIGH (cell de gpios) ← convención upstream
+```
+
+Aplicar `bash scripts/patch-dtb.sh` regenera el DTB con los flags correctos.
+
+### 12.4 Estado final del sistema
+
+| Componente | Estado actual | Notas |
+|---|---|---|
+| `/boot/efi/qrb2210-arduino-imola-gigadisplay.dtb` | **Patched con flags corregidos** | `reset-gpios <26 18 0>`, `irq-gpios <26 98 0>` |
+| `/etc/modprobe.d/blacklist-goodix.conf` | **REMOVIDO** | Ya no hace falta — kernel driver funciona |
+| `gt911-touch.service` | **disabled** | Plan A ya no es necesario; queda como respaldo si se desinstala |
+| `/usr/local/bin/gt911-touch-daemon.py` | Presente (desactivado) | Disponible si en el futuro se quiere volver a Plan A |
+| `/lib/modules/.../goodix_ts.ko` | Original Arduino sin patch | `md5: f7dba424...` |
+| `/lib/modules/.../goodix_ts.ko.original` | Backup redundante | Puede borrarse |
+| `/lib/firmware/goodix_911_cfg.bin` | Presente pero opcional | Driver lo carga; si no estuviera, chip usaría su flash interna que también tiene config válida (ahora que el reset es correcto) |
+| `/etc/X11/xorg.conf.d/20-goodix-touch.conf` | Calibración instalada | Matriz funciona igual para daemon y kernel driver (mismos abs_max=479/799) |
+
+### 12.5 Verificación de Plan B
+
+```bash
+export SSHPASS='arduino1334'
+./scripts/remote-ssh.sh 'lsmod | grep goodix_ts'   # esperado: goodix_ts cargado
+./scripts/remote-ssh.sh 'cat /proc/interrupts | grep gt911'  # IRQ count > 0
+./scripts/remote-ssh.sh 'cat /proc/bus/input/devices | grep Goodix'  # device sin sufijo "(userspace daemon)"
+./scripts/remote-ssh.sh 'timeout 5 evtest /dev/input/event2 | grep ABS_MT_POSITION'  # eventos al tocar
+```
+
+### 12.6 Lecciones para futuros DTBs
+
+- **Los DT flags GPIO no son intuitivos.** `GPIO_ACTIVE_LOW` aplicado a un pin físicamente "active-low" (como un reset asserted-low) **NO compensa la polaridad para el código** — al revés, INVIERTE lo que el código pide vía `gpiod_set_value()`. La convención correcta para drivers como `goodix.c` es ALMOST SIEMPRE `GPIO_ACTIVE_HIGH=0`, dejando que el código del driver maneje la lógica.
+- **Antes de inventar un patch de driver, verificar contra árbol upstream.** En este caso, 30 minutos de comparación con `imx6q-kp.dtsi` y similares habrían encontrado el bug inmediatamente, ahorrando varias horas de cacería incorrecta de un bug que no existía.
+- **`libgpiod` userspace evita los flags del DT.** Por eso un Plan A daemon-userspace puede funcionar incluso con un DTB malo — y eso enmascara que el problema real es el DTB, no el kernel driver.
+
+### 12.7 Próximos pasos (opcionales)
+
+- Borrar `/lib/modules/.../goodix_ts.ko.original` del device (backup ya no necesario)
+- Borrar `~/kernel-source` y `~/compiling_goodix` del device (leftovers del intento del equipo de soporte, ~2 GB)
+- Borrar `~/Documents/electroniccats/linux-qcom-build/` del PC (cross-compile ya no necesario, ~5-7 GB)
+- Considerar reportar a Arduino/upstream: el DTS de UNO Q que viene de fábrica podría incluir el nodo gt911 con flags correctos así nadie más cae en esto.
