@@ -33,10 +33,16 @@ echo "TLMM phandle hex: 0x$TLMM_PH_HEX (dec: $TLMM_PH)"
 ADDR_INT=$((ADDR_HEX))
 echo "Direccion I2C: $ADDR_HEX (dec: $ADDR_INT)"
 
-# IRQ flag: IRQ_TYPE_EDGE_FALLING = 2
-# GPIO flag: GPIO_ACTIVE_LOW = 1 (para RST que es active-low en GT911)
-IRQ_FLAG=2
-RST_FLAG=1
+# IRQ flag para interrupts-extended: IRQ_TYPE_EDGE_FALLING = 2 (formato distinto a gpio flags)
+IRQ_TRIGGER_FLAG=2
+
+# GPIO flags para irq-gpios y reset-gpios: GPIO_ACTIVE_HIGH = 0
+# IMPORTANTE: el driver `drivers/input/touchscreen/goodix.c` espera la convención
+# upstream (verificada en imx6q-kp.dtsi, stm32mp135f-dk.dts, rk3399-rockpro64.dtsi):
+# las dos propiedades usan GPIO_ACTIVE_HIGH. Si se setean ACTIVE_LOW o OPEN_DRAIN,
+# `gpiod_direction_output(rst, 0)` (intentando aplicar reset) acaba dejando físico HIGH,
+# y la secuencia del datasheet queda invertida — el chip jamás entra en modo normal.
+GPIO_FLAG=0
 
 echo
 echo "=== creando nodo $NODE (idempotente) ==="
@@ -48,11 +54,10 @@ sudo fdtput -t s  $DTB $NODE compatible "$COMPATIBLE"
 sudo fdtput -t i  $DTB $NODE reg $ADDR_INT
 # interrupts-extended <&tlmm IRQ_GPIO IRQ_TYPE_EDGE_FALLING> — necesario para que el
 # kernel populate client->irq con un IRQ valido. Sin esto request_threaded_irq devuelve EINVAL.
-sudo fdtput -t i  $DTB $NODE interrupts-extended $TLMM_PH $IRQ_GPIO $IRQ_FLAG
-# irq-gpios sigue siendo necesario porque el driver lo manipula durante el reset
-# (drive INT high/low para seleccionar la direccion I2C del chip)
-sudo fdtput -t i  $DTB $NODE irq-gpios   $TLMM_PH $IRQ_GPIO $IRQ_FLAG
-sudo fdtput -t i  $DTB $NODE reset-gpios $TLMM_PH $RST_GPIO $RST_FLAG
+sudo fdtput -t i  $DTB $NODE interrupts-extended $TLMM_PH $IRQ_GPIO $IRQ_TRIGGER_FLAG
+# irq-gpios y reset-gpios usan GPIO_ACTIVE_HIGH (convención upstream del driver goodix)
+sudo fdtput -t i  $DTB $NODE irq-gpios   $TLMM_PH $IRQ_GPIO $GPIO_FLAG
+sudo fdtput -t i  $DTB $NODE reset-gpios $TLMM_PH $RST_GPIO $GPIO_FLAG
 sudo fdtput -t s  $DTB $NODE status "okay"
 
 echo
