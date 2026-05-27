@@ -11,7 +11,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
 
     env:
       KERNEL_REPO: arduino/linux-qcom
@@ -61,7 +61,7 @@ jobs:
           cp ../kernel/configs/uno-q-7.0.0.config .config
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
 
-      - name: Build kernel modules
+      - name: Build vmlinux (produces Module.symvers needed by modpost)
         run: |
           cd kbuild
           export PATH="/usr/lib/ccache:$PATH"
@@ -70,8 +70,19 @@ jobs:
             ARCH=arm64 \
             CROSS_COMPILE=aarch64-linux-gnu- \
             CC="ccache aarch64-linux-gnu-gcc" \
-            vmlinux modules
+            vmlinux modules_prepare
           ccache -s
+
+      - name: Build only the panel-sitronix-st7701 module
+        run: |
+          cd kbuild
+          export PATH="/usr/lib/ccache:$PATH"
+          make -j"$(nproc)" \
+            ARCH=arm64 \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CC="ccache aarch64-linux-gnu-gcc" \
+            M=drivers/gpu/drm/panel
+          ls -la drivers/gpu/drm/panel/panel-sitronix-st7701.ko
 
       - name: Extract and strip panel module
         run: |
