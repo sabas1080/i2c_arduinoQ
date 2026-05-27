@@ -26,7 +26,20 @@ Out of scope: automating the physical wiring, hosting the kernel source, support
 
 ## 4. License
 
-**MIT.** Copyright "2026 Sabas Jimenez / Electronic Cats". Standard MIT text in `LICENSE`. No dual-licensing for docs.
+**Project license: MIT.** Copyright "2026 Sabas Jimenez / Electronic Cats". Standard MIT text in `LICENSE`. Covers the userspace scripts and original documentation.
+
+### License attribution per file
+
+The repository ships three categories of artifact with different licensing constraints:
+
+| File / category | License | Rationale |
+|---|---|---|
+| `LICENSE`, `README.md`, `CONTRIBUTING.md`, `CHANGELOG.md`, `docs/**`, `.github/**`, `scripts/enable-gigadisplay-shield.sh`, `tools/dev/build-panel-module.sh` | MIT | Original work for this project. |
+| `scripts/gigadisplay-shield.dtso` | `GPL-2.0+ OR BSD-3-Clause` | Kernel device-tree source; already carries SPDX header following the standard kernel DTS convention. |
+| `kernel/panel-sitronix-st7701.patch` | `GPL-2.0+ OR BSD-3-Clause` | Derived from the upstream `panel-sitronix-st7701.c` driver. SPDX header in the patch's added lines must match the original file. |
+| `panel-sitronix-st7701.ko` (Release asset, never in git) | GPL-2.0 | Compiled from GPL kernel sources; redistribution follows kernel GPL terms. |
+
+**README "Licensing" section** spells this out in plain English so reusers know which pieces they can lift under MIT and which carry GPL obligations. No dual-licensing in the top-level `LICENSE` file — SPDX headers per-file do the work cleanly.
 
 ## 5. Repository layout (post-cleanup)
 
@@ -66,7 +79,7 @@ i2c_arduinoQ/
 ### Files removed (from working tree AND git history)
 
 - `ABX00162-*.pdf`, `ASX00039-*.pdf`, `GT911_Datasheet.pdf` — Arduino proprietary, link to docs.arduino.cc instead.
-- `Test Shield-Adapter.docx` — same.
+- `Test Shield-Adapter.docx` — Arduino internal support note, tracked since the initial commit `e969770`; remove with `git rm` (it does not appear in any other extension). Possibly proprietary; do not republish without explicit permission.
 - `docs/HANDOFF.md` — Spanish bitácora with obsolete diagnostics.
 - `docs/superpowers/` — internal planning artifacts.
 - `notes/` — measurement logs; not useful for public audience.
@@ -125,10 +138,12 @@ Already exists in the working tree. Stays as-is functionally, with these polish 
 One paragraph: DSI panel + GT911 touch + X11 calibration end-to-end.
 
 ## Status matrix
-| | Kernel 6.16.7 | Kernel 7.0.0 |
-| Display | ✓ | ✓ (patched module) |
-| Touch   | ✓ | ✓ |
-| X11     | ✓ | ✓ |
+| Feature | Kernel 7.0.0-g122c2c22d838 |
+| Display DSI 480×800 | ✓ (patched panel-sitronix-st7701 module) |
+| Touch GT911 (I2C 0x14) | ✓ (kernel goodix_ts via DT overlay) |
+| X11 cursor (calibrated, landscape) | ✓ |
+
+> Kernel 6.16.7 is **not** supported by the current release script; it was the original development target and remains visible in git history if you need to retrace the journey. See `docs/how-it-works.md` → "Project history".
 
 ## Quick start
 1. Flash official Arduino UNO Q image.
@@ -164,11 +179,12 @@ MIT.
 - Voltage note: 1.8V/3.3V marginal, works empirically without level shifter for short wires.
 
 ### `docs/how-it-works.md`
-Four sections:
+Five sections:
 1. **The panel descriptor problem (kernel 7.0.0):** Arduino removed `arduino_giga_display_desc` from `panel-sitronix-st7701` in 7.0.0. The patched module reintroduces it.
 2. **The device-tree overlay:** what `gigadisplay-shield.dtso` adds (the gt911@14 node, the panel hookup) and how `fdtoverlay` composes it onto the base DTB.
 3. **The boot loader entry:** why we add `devicetree /...` and `video=DSI-1:480x800@60` to `/boot/efi/loader/entries/`.
 4. **X11 calibration:** what the TransformationMatrix means and how it was derived (4-corner capture with evtest, normalized to abs_max=479/799).
+5. **Project history:** the 6.16.7 path, the GPIO-flags-in-DTB bug (red herrings: T8 timing, pinctrl-msm), and why the kernel-7.0.0 + overlay + patched-module approach is now canonical. Honors the work but doesn't confuse the user about what to actually run.
 
 ### `docs/troubleshooting.md`
 Table-driven: Symptom → likely cause → diagnostic command → fix. Examples:
@@ -183,16 +199,24 @@ Table-driven: Symptom → likely cause → diagnostic command → fix. Examples:
 
 Trigger: tags matching `v*`.
 
+**Important constraint:** an out-of-tree `make M=drivers/gpu/drm/panel` build fails with "unresolved symbols" because `modules_prepare` does not produce `Module.symvers`; only a full kernel build does. The workflow therefore performs a full `make modules` (which builds `vmlinux` as a dependency and writes `Module.symvers`) and extracts only the panel `.ko` afterward. Verified empirically by Sabas on local cross-build.
+
 Steps:
 1. Checkout this repo.
-2. Setup Ubuntu runner, install `gcc-aarch64-linux-gnu libelf-dev libssl-dev flex bison bc cpio`.
-3. Shallow clone `arduino/linux-qcom@qcom-v7.0.0-unoq`.
-4. Apply `kernel/panel-sitronix-st7701.patch`.
-5. Configure kernel using `kernel/configs/uno-q-7.0.0.config`.
-6. Build the single module: `make M=drivers/gpu/drm/panel`.
-7. Strip and copy `panel-sitronix-st7701.ko` to `./artifacts/`.
+2. Restore caches (see "Caching" below). Cache miss falls through to steps 3-6; cache hit jumps to step 7.
+3. Install host packages: `gcc-aarch64-linux-gnu libelf-dev libssl-dev flex bison bc cpio ccache`.
+4. Clone `arduino/linux-qcom@qcom-v7.0.0-unoq` (full clone — shallow misses tag refs needed for the kernel's own version computation).
+5. Apply `kernel/panel-sitronix-st7701.patch` and copy `kernel/configs/uno-q-7.0.0.config` to the kernel tree as `.config`. Run `make olddefconfig` to absorb any new symbols.
+6. Build: `make -j$(nproc) ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="ccache aarch64-linux-gnu-gcc" modules`.
+7. Extract: `aarch64-linux-gnu-strip --strip-debug drivers/gpu/drm/panel/panel-sitronix-st7701.ko` and copy to `./artifacts/panel-sitronix-st7701-<kernel-release>.ko`.
 8. Compute SHA256, write `SHA256SUMS`.
-9. Create / update GitHub Release for the tag, attach `panel-sitronix-st7701-<kernel>.ko` and `SHA256SUMS`.
+9. Create / update GitHub Release for the tag, attach the `.ko` and `SHA256SUMS`.
+
+**Caching strategy** (keep first build under ~40 min, subsequent under ~5 min):
+- Cache key: `kernel-tree-${{ hashFiles('kernel/panel-sitronix-st7701.patch', 'kernel/configs/uno-q-7.0.0.config') }}-${{ env.KERNEL_BRANCH_SHA }}`.
+- Cache paths: the cloned kernel tree (post-build), `~/.ccache`.
+- On cache hit, skip the clone+patch+config steps and re-link from cached `.o` files (kernel's incremental build catches what changed).
+- `KERNEL_BRANCH_SHA` resolved at runtime via a small step that does `git ls-remote arduino/linux-qcom qcom-v7.0.0-unoq` and stashes the SHA into `$GITHUB_ENV` — this invalidates the cache when Arduino force-pushes the branch.
 
 ### `.github/workflows/shellcheck.yml`
 
@@ -207,21 +231,66 @@ Trigger: pull_request, push to main. Runs `shellcheck scripts/**/*.sh tools/**/*
 - **`.github/ISSUE_TEMPLATE/replication_help.md`** — checklist for "doesn't work for me" reports: exact hardware, kernel running (`uname -r`), wiring photo, output of `i2cdetect -y 0`, output of `evtest`.
 - **`.github/PULL_REQUEST_TEMPLATE.md`** — checklist: tested on real hardware, shellcheck passes, no secrets, no `.ko` committed.
 
-## 12. Release plan (chronological)
+## 12. Release plan (two-phase)
 
-1. Change UNO Q password.
-2. Translate `enable-gigadisplay-shield.sh` comments + polish `--help`.
-3. Write English README, `docs/how-it-works.md`, `docs/troubleshooting.md`, `docs/wiring.md`.
-4. Add `LICENSE`, `CONTRIBUTING.md`, `CHANGELOG.md`, issue/PR templates.
-5. Add CI workflows.
-6. Move `build-st7701-patched-ko.sh` → `tools/dev/build-panel-module.sh`, scrub defaults.
-7. Extract the panel module diff into `kernel/panel-sitronix-st7701.patch`. The patch currently lives inline in `scripts/build-st7701-patched-ko.sh` (as a heredoc + Python OFMATCH insertion); extract it into a real unified diff that `git apply` / `patch -p1` can consume directly. Capture the running kernel `.config` into `kernel/configs/uno-q-7.0.0.config`.
-8. Delete obsolete scripts, PDFs, docx, notes/, HANDOFF.md, docs/superpowers/.
-9. Local commit of all the above as "chore: prepare for public release".
-10. Run `git filter-repo` with the replacements file from §6.
-11. Force-push to `origin main`.
-12. Create first GitHub Release `v0.1.0` to trigger the CI workflow that builds + attaches the `.ko`.
-13. Verify replication: on a freshly-flashed UNO Q, download the Release bundle and run the script — confirm display + touch + X11 all work.
+The plan is intentionally split into a **Phase A** of normal-history commits to the working tree, and a **Phase B** of destructive history-rewrite operations. If anything in Phase A fails or needs to be rolled back, nothing destructive has happened to the remote yet. Phase B only fires once Phase A is fully committed and visually reviewed.
+
+### Phase A — working-tree preparation (normal commits)
+
+A1. **Change the UNO Q password.** Defense in depth — the leaked password becomes invalid regardless of what happens next.
+
+A2. **Polish `enable-gigadisplay-shield.sh`:** translate inline comments + section banners to English, enrich `--help`, expand prerequisites check (warn if user not in `i2c`/`gpiod`/`input` groups), add clear error + Release-URL hint when `.ko`/`.dtso` companions are missing.
+
+A3. **Write English documentation:** `README.md`, `docs/how-it-works.md`, `docs/troubleshooting.md`, `docs/wiring.md`, `docs/images/`.
+
+A4. **Add community files:** `LICENSE` (MIT), `CONTRIBUTING.md`, `CHANGELOG.md`, `.github/ISSUE_TEMPLATE/{bug_report,replication_help}.md`, `.github/PULL_REQUEST_TEMPLATE.md`.
+
+A5. **Add CI workflows:** `.github/workflows/build-panel-module.yml` and `.github/workflows/shellcheck.yml`.
+
+A6. **Relocate maintainer tooling:** `scripts/build-st7701-patched-ko.sh` → `tools/dev/build-panel-module.sh`; remove hardcoded `***REDACTED***` / `192.168.0.XXX` defaults (require env vars or fail clearly).
+
+A7. **Extract the panel patch to a self-contained unified diff** (`kernel/panel-sitronix-st7701.patch`). Concrete recipe, reproducible from scratch:
+   ```bash
+   # In a scratch directory, NOT the public repo:
+   git clone --branch qcom-v7.0.0-unoq --depth 200 \
+     https://github.com/arduino/linux-qcom.git kbuild
+   cd kbuild
+   # Apply the inline patch from the legacy build script (one-time bootstrap):
+   ../i2c_arduinoQ/tools/dev/build-panel-module.sh --apply-patch-only
+   git add drivers/gpu/drm/panel/panel-sitronix-st7701.c
+   git commit -m "panel: reintroduce arduino_giga_display_desc for GIGA shield"
+   git format-patch -1 HEAD --stdout > ../i2c_arduinoQ/kernel/panel-sitronix-st7701.patch
+   ```
+   Then verify: `cd kbuild-fresh && git apply --check ../i2c_arduinoQ/kernel/panel-sitronix-st7701.patch`. The implementation plan will decide whether `--apply-patch-only` needs to be added to the build script as a non-destructive mode, or whether the heredoc gets inlined into the patch generation directly.
+
+A8. **Capture the running kernel `.config`** from a UNO Q at the target kernel into `kernel/configs/uno-q-7.0.0.config` (used by CI).
+
+A9. **Delete obsolete tree:** PDFs, `Test Shield-Adapter.docx` (currently tracked in git since the initial commit `e969770`; needs `git rm`, not just leaving aside), `docs/HANDOFF.md`, `docs/superpowers/`, `notes/`, and the 12 superseded scripts listed in §5.
+
+A10. **Commit Phase A.** Single or grouped commits as appropriate, ending with a `chore: prepare for public release` head commit.
+
+A11. **Visual review on GitHub.** Push Phase A to a feature branch (e.g. `prep/v0.1.0`) and open a draft PR against `main` so you can review the diff in the GitHub UI before merging or proceeding to Phase B. **Do not push to `main` yet.**
+
+### Phase B — destructive history rewrite (only after A is green)
+
+B1. **Backup branch.** Locally and on the remote:
+   ```bash
+   git branch backup/pre-filter-repo-$(date -I) main
+   git push origin backup/pre-filter-repo-$(date -I)
+   ```
+   This is the safety net. If the rewrite goes wrong, restore from this branch.
+
+B2. **Merge `prep/v0.1.0` → `main`** so `main` has the clean Phase A state. This is the last non-destructive operation.
+
+B3. **Run `git filter-repo`** with the replacements file from §6 on the local clone of `main`.
+
+B4. **Verify scrubbing locally** before pushing: `git log -p | grep -E '(***REDACTED***|***REDACTED***|/path/to/repo|192\.168\.0\.(105|149|184))'` must return zero hits.
+
+B5. **Force-push** with `--force-with-lease origin main`.
+
+B6. **Tag `v0.1.0`** and push the tag → triggers the CI workflow that builds and attaches the `.ko` to a fresh GitHub Release.
+
+B7. **End-to-end replication test:** on a freshly-flashed UNO Q, download the Release bundle (`enable-gigadisplay-shield.sh` + `gigadisplay-shield.dtso` + `.ko`) and run the script. Confirm display + touch + X11 all work, with no reference to anything outside the public repo and its Release.
 
 ## 13. Out-of-scope (deliberate exclusions)
 
