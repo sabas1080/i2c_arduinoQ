@@ -74,7 +74,7 @@ elif [ -d /sys/class/drm/card0-DP-1 ]; then
     info "If the display works, update 10-monitor.conf to use DP-1"
 else
     bad "No DSI-1 or DP-1 connector found in /sys/class/drm/"
-    info "Connectors present: $(ls /sys/class/drm/ 2>/dev/null | grep card | head)"
+    info "Connectors present: $(printf '%s ' /sys/class/drm/card* 2>/dev/null | head -c 200)"
 fi
 
 # ------------------------- 4. touch chip GT911 ------------------------------
