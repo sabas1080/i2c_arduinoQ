@@ -1,46 +1,46 @@
 #!/usr/bin/env bash
-# enable-gigadisplay-shield.sh — habilita display + touch del Arduino GIGA
-# Display Shield (ASX00039) en una Arduino UNO Q (ABX00162) con la imagen
-# Arduino oficial, kernel 7.0.0-g122c2c22d838.
+# enable-gigadisplay-shield.sh — enables display + touch of the Arduino GIGA
+# Display Shield (ASX00039) of an Arduino UNO Q (ABX00162) on the official
+# Arduino image, kernel 7.0.0-g122c2c22d838.
 #
-# === IMPORTANTE ===
-# Este script se corre EN EL DEVICE (no en una PC remota). Asume que estás
-# logueado en el UNO Q (via SSH propio, adb shell, terminal directa).
+# === IMPORTANT ===
+# Run this script ON THE DEVICE (not from a remote PC). It assumes you are
+# logged into the UNO Q (via your own SSH, adb shell, or directly attached terminal).
 #
-# Lo que hace (todo en el kernel 7.0.0 actual, sin downgrade):
-#   1. Instala un módulo `panel-sitronix-st7701.ko` parchado que contiene el
-#      descriptor del panel del GIGA shield (Arduino lo removió en 7.0.0 —
-#      este parche lo retorna desde el branch 6.16.7).
-#   2. Compila el overlay `gigadisplay-shield.dtso` con dtc.
-#   3. Aplica el overlay con fdtoverlay sobre el DTB base de 7.0.0,
-#      generando un DTB compuesto que activa el panel DSI + node gt911@14.
-#   4. Edita la boot loader entry de 7.0.0 para cargar el DTB compuesto y
-#      configurar video=DSI-1:480x800@60.
-#   5. Instala xorg snippets: rotación landscape "right" + calibración touch.
+# What it does (entirely on the current 7.0.0 kernel — no downgrade):
+#   1. Installs a patched `panel-sitronix-st7701.ko` module that carries the
+#      GIGA shield panel descriptor (Arduino removed it in 7.0.0 —
+#      this patch reinstates it from the 6.16.7 branch).
+#   2. Compiles the `gigadisplay-shield.dtso` overlay with dtc.
+#   3. Applies the overlay onto the 7.0.0 base DTB with fdtoverlay,
+#      producing a composed DTB that activates the DSI panel + gt911@14 node.
+#   4. Edits the 7.0.0 boot loader entry to load the composed DTB and
+#      configure video=DSI-1:480x800@60.
+#   5. Installs xorg snippets: landscape "right" rotation + touch calibration.
 #   6. Reboot.
 #
-# Después del reboot: el panel st7701 inicializa con el descriptor del GIGA,
-# y el chip touch GT911 funciona con el kernel driver `goodix_ts.ko` original.
+# After reboot: the st7701 panel initialises with the GIGA descriptor,
+# and the GT911 touch chip works with the stock `goodix_ts.ko` kernel driver.
 #
-# Archivos requeridos junto al script (mismo directorio):
-#   - panel-sitronix-st7701.ko    (módulo cross-compilado del kernel parchado)
-#   - gigadisplay-shield.dtso     (overlay device-tree source)
+# Files required next to the script (same directory):
+#   - panel-sitronix-st7701.ko    (cross-compiled module from the patched kernel)
+#   - gigadisplay-shield.dtso     (device-tree overlay source)
 #
-# Requiere sudo. Pedirá password una vez al inicio.
-# Es IDEMPOTENTE: se puede correr varias veces; skipea pasos ya hechos.
+# Requires sudo. Asks for the password once at the start.
+# Idempotent: safe to re-run; skips steps already done.
 #
 # Flags:
-#   --no-reboot   no reiniciar al final
-#   --revert      deshace TODO (restaura módulo original, quita DTB
-#                 compuesto, limpia boot entry y xorg snippets, NO reinicia)
-#   --help        muestra esta ayuda
+#   --no-reboot   do not reboot at the end
+#   --revert      undoes EVERYTHING (restores the original module, removes the
+#                 composed DTB, cleans the boot entry and xorg snippets, does NOT reboot)
+#   --help        shows this help
 #
-# Soporte: ver docs/HANDOFF.md §12 / §14 para el análisis completo del bug
-# del DTB GPIO flags y por qué se eliminó el descriptor del panel en 7.0.0.
+# See docs/how-it-works.md for the full analysis of the underlying
+# issues and why Arduino removed the panel descriptor in 7.0.0.
 
 set -euo pipefail
 
-# -------------------- argumentos ---------------------------------------------
+# -------------------- arguments ----------------------------------------------
 DO_REBOOT=1
 DO_REVERT=0
 for arg in "$@"; do
@@ -48,25 +48,25 @@ for arg in "$@"; do
         --no-reboot) DO_REBOOT=0 ;;
         --revert)    DO_REVERT=1; DO_REBOOT=0 ;;
         --help|-h)
-            sed -n 's/^# \?//p' "$0" | sed -n '/^enable-gigadisplay/,/^Soporte:/p'
+            sed -n 's/^# \?//p' "$0" | sed -n '/^enable-gigadisplay/,/^See docs/p'
             exit 0
             ;;
         *)
-            echo "ERROR: argumento desconocido: $arg" >&2
-            echo "Usa --help para ver opciones." >&2
+            echo "ERROR: unknown argument: $arg" >&2
+            echo "Use --help to see options." >&2
             exit 2
             ;;
     esac
 done
 
-# -------------------- constantes --------------------------------------------
+# -------------------- constants ---------------------------------------------
 KERNEL_TARGET="7.0.0-g122c2c22d838"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 PATCHED_KO="${SCRIPT_DIR}/panel-sitronix-st7701.ko"
 OVERLAY_DTSO="${SCRIPT_DIR}/gigadisplay-shield.dtso"
 
-# Paths en el device
+# Paths on the device
 MODULES_DIR="/lib/modules/${KERNEL_TARGET}"
 KO_TARGET="${MODULES_DIR}/kernel/drivers/gpu/drm/panel/panel-sitronix-st7701.ko"
 KO_BACKUP="${KO_TARGET}.original"
@@ -83,161 +83,161 @@ info()    { echo "    $*"; }
 fail()    { echo "ERROR: $*" >&2; exit 1; }
 
 # -------------------- sanity checks -----------------------------------------
-section "Verificación inicial"
+section "Initial verification"
 
 if [ ! -f /proc/device-tree/model ] || ! grep -qi "arduino" /proc/device-tree/model 2>/dev/null; then
-    fail "este script debe ejecutarse en un Arduino UNO Q (no detecté el board)."
+    fail "this script must run on an Arduino UNO Q (board not detected)."
 fi
 info "Board: $(tr -d '\0' < /proc/device-tree/model)"
 KERNEL_RUNNING=$(uname -r)
 info "Kernel running: ${KERNEL_RUNNING}"
 
 if [ "$KERNEL_RUNNING" != "$KERNEL_TARGET" ]; then
-    fail "kernel running '$KERNEL_RUNNING' ≠ target '$KERNEL_TARGET'. Asegúrate de bootear con el kernel correcto."
+    fail "running kernel '$KERNEL_RUNNING' ≠ target '$KERNEL_TARGET'. Boot the correct kernel and re-run."
 fi
 
 if [ "$EUID" -eq 0 ]; then
-    fail "no ejecutes como root. Corre como user normal; el script invoca sudo cuando necesite."
+    fail "do not run as root. Run as a normal user; the script invokes sudo when needed."
 fi
 
-info "Pidiendo privilegios sudo…"
-sudo -v || fail "no se obtuvo sudo."
+info "Requesting sudo privileges…"
+sudo -v || fail "sudo not granted."
 ( while true; do sudo -nv 2>/dev/null; sleep 60; done ) &
 SUDO_KEEPALIVE_PID=$!
 trap "kill $SUDO_KEEPALIVE_PID 2>/dev/null || true" EXIT
 
-# Localizar boot entry de 7.0.0
+# Locate boot entry for 7.0.0
 TARGET_ENTRY=$(ls "${ENTRIES_DIR}"/*${KERNEL_TARGET}*.conf 2>/dev/null | head -1) || true
-[ -n "$TARGET_ENTRY" ] || fail "no encontré boot loader entry para $KERNEL_TARGET en $ENTRIES_DIR/"
+[ -n "$TARGET_ENTRY" ] || fail "boot loader entry not found for $KERNEL_TARGET in $ENTRIES_DIR/"
 info "Boot entry: $TARGET_ENTRY"
 
-# -------------------- --revert: deshacer todo -------------------------------
+# -------------------- --revert: undoing everything --------------------------
 if [ "$DO_REVERT" -eq 1 ]; then
-    section "REVERT: deshaciendo cambios"
+    section "REVERT: undoing changes"
 
-    # Restaurar módulo original
+    # Restore the original module
     if [ -f "$KO_BACKUP" ]; then
         sudo mv "$KO_BACKUP" "$KO_TARGET"
         sudo depmod -a
-        info "Restaurado módulo original: $KO_TARGET"
+        info "Original module restored: $KO_TARGET"
     fi
 
-    # Quitar líneas devicetree + video= del boot entry
+    # Remove devicetree + video= lines from the boot entry
     if [ -f "$TARGET_ENTRY" ]; then
         sudo sed -i "/^devicetree \/${COMPOSED_DTB_NAME}\$/d" "$TARGET_ENTRY"
         sudo sed -i "s| video=DSI-1:480x800@60 video=DP-1:d||" "$TARGET_ENTRY"
-        info "Limpiado boot entry $TARGET_ENTRY"
+        info "Cleaned boot entry $TARGET_ENTRY"
     fi
 
-    # Borrar DTB compuesto
+    # Remove the composed DTB
     sudo rm -f "$COMPOSED_DTB"
-    info "Removido $COMPOSED_DTB"
+    info "Removed $COMPOSED_DTB"
 
-    # Borrar xorg snippets
+    # Remove xorg snippets
     sudo rm -f "$XORG_MONITOR" "$XORG_TOUCH"
-    info "Removidos xorg snippets"
+    info "xorg snippets removed"
 
-    section "REVERT completo. Reinicia manualmente para volver al estado previo."
+    section "REVERT complete. Reboot manually to return to the previous state."
     exit 0
 fi
 
-# -------------------- prerequisitos para enable -----------------------------
-[ -f "$PATCHED_KO" ] || fail "no encontré $PATCHED_KO — el módulo cross-compilado tiene que estar junto al script."
-[ -f "$OVERLAY_DTSO" ] || fail "no encontré $OVERLAY_DTSO — el overlay source tiene que estar junto al script."
-[ -f "$BASE_DTB" ] || fail "no encontré $BASE_DTB — el package linux-image-${KERNEL_TARGET} puede estar incompleto."
+# -------------------- enable prerequisites ----------------------------------
+[ -f "$PATCHED_KO" ] || fail "not found: $PATCHED_KO — the cross-compiled module must sit next to the script."
+[ -f "$OVERLAY_DTSO" ] || fail "not found: $OVERLAY_DTSO — the overlay source must sit next to the script."
+[ -f "$BASE_DTB" ] || fail "not found: $BASE_DTB — the linux-image-${KERNEL_TARGET} package may be incomplete."
 
 for cmd in dtc fdtoverlay fdtput fdtget; do
-    command -v "$cmd" >/dev/null || fail "comando '$cmd' no encontrado en PATH"
+    command -v "$cmd" >/dev/null || fail "command '$cmd' not found in PATH"
 done
 info "Tools OK (dtc, fdtoverlay, fdtput, fdtget)"
 
-# Backup automático de la boot entry
+# Automatic backup of the boot entry
 BACKUP_ENTRY="${TARGET_ENTRY}.backup-pre-gigadisplay"
 if [ ! -f "$BACKUP_ENTRY" ]; then
     sudo cp "$TARGET_ENTRY" "$BACKUP_ENTRY"
-    info "Backup de boot entry: $BACKUP_ENTRY"
+    info "Boot entry backup: $BACKUP_ENTRY"
 fi
 
-# -------------------- FASE 1: instalar módulo parchado ----------------------
-section "FASE 1: instalar módulo panel-sitronix-st7701.ko parchado"
+# -------------------- PHASE 1: install patched module -----------------------
+section "PHASE 1: install patched panel-sitronix-st7701.ko module"
 
-# Backup del .ko original (idempotente)
+# Back up the original .ko (idempotent)
 if [ ! -f "$KO_BACKUP" ] && [ -f "$KO_TARGET" ]; then
     sudo cp "$KO_TARGET" "$KO_BACKUP"
-    info "1.1 Backup del .ko original: $KO_BACKUP"
+    info "1.1 Original .ko backed up to: $KO_BACKUP"
 fi
 
 sudo cp "$PATCHED_KO" "$KO_TARGET"
 sudo chown root:root "$KO_TARGET"
 sudo chmod 644 "$KO_TARGET"
-info "1.2 Instalado .ko parchado en $KO_TARGET"
+info "1.2 Patched .ko installed at $KO_TARGET"
 info "    md5: $(md5sum "$KO_TARGET" | cut -d' ' -f1)"
 
 sudo depmod -a
 info "1.3 depmod -a OK"
 
-# -------------------- FASE 2: compilar overlay y componer DTB ---------------
-section "FASE 2: compilar overlay + componer DTB"
+# -------------------- PHASE 2: compile overlay + compose DTB ----------------
+section "PHASE 2: compile overlay + compose DTB"
 
 TMP_DTBO=$(mktemp --suffix=.dtbo)
 TMP_OUT=$(mktemp --suffix=.dtb)
 trap "rm -f '$TMP_DTBO' '$TMP_OUT'; kill $SUDO_KEEPALIVE_PID 2>/dev/null || true" EXIT
 
-# 2.1 compilar dtso → dtbo
+# 2.1 compile dtso → dtbo
 dtc -I dts -O dtb -o "$TMP_DTBO" "$OVERLAY_DTSO" 2>&1 | grep -v "^$" || true
-[ -s "$TMP_DTBO" ] || fail "dtc no produjo overlay binario"
-info "2.1 Overlay compilado: $(stat -c%s "$TMP_DTBO") bytes"
+[ -s "$TMP_DTBO" ] || fail "dtc did not produce a binary overlay"
+info "2.1 Overlay compiled: $(stat -c%s "$TMP_DTBO") bytes"
 
-# 2.2 aplicar overlay sobre base DTB
+# 2.2 apply overlay onto the base DTB
 fdtoverlay -i "$BASE_DTB" -o "$TMP_OUT" "$TMP_DTBO" 2>&1 | grep -v "^$" || true
-[ -s "$TMP_OUT" ] || fail "fdtoverlay falló al componer DTB"
-info "2.2 DTB compuesto: $(stat -c%s "$TMP_OUT") bytes"
+[ -s "$TMP_OUT" ] || fail "fdtoverlay failed to compose the DTB"
+info "2.2 Composed DTB: $(stat -c%s "$TMP_OUT") bytes"
 
-# 2.3 mover DTB compuesto a /boot/efi/
+# 2.3 move composed DTB to /boot/efi/
 sudo install -m 0644 "$TMP_OUT" "$COMPOSED_DTB"
-info "2.3 DTB compuesto instalado en $COMPOSED_DTB"
+info "2.3 Composed DTB installed at $COMPOSED_DTB"
 
-# 2.4 verificar que el gt911 node está en el DTB compuesto (path-agnóstico)
+# 2.4 verify the gt911 node is present in the composed DTB (path-agnostic)
 if sudo dtc -I dtb -O dts "$COMPOSED_DTB" 2>/dev/null | grep -qE "compatible[[:space:]]*=[[:space:]]*\"goodix,gt911\""; then
-    info "    gt911 node OK en DTB compuesto"
+    info "    gt911 node OK in composed DTB"
 else
-    info "    WARNING: no encontré gt911 en el DTB compuesto (verificar manualmente con dtc -I dtb -O dts $COMPOSED_DTB)"
+    info "    WARNING: gt911 not found in the composed DTB (inspect manually with dtc -I dtb -O dts $COMPOSED_DTB)"
 fi
 if sudo dtc -I dtb -O dts "$COMPOSED_DTB" 2>/dev/null | grep -qE "compatible[[:space:]]*=[[:space:]]*\"arduino,giga-display\""; then
-    info "    panel arduino,giga-display OK en DTB compuesto"
+    info "    panel arduino,giga-display OK in composed DTB"
 else
-    info "    WARNING: panel arduino,giga-display no aparece en DTB"
+    info "    WARNING: panel arduino,giga-display does not appear in the DTB"
 fi
 
-# -------------------- FASE 3: editar boot entry -----------------------------
-section "FASE 3: editar boot entry de $KERNEL_TARGET"
+# -------------------- PHASE 3: edit boot entry ------------------------------
+section "PHASE 3: edit boot entry for $KERNEL_TARGET"
 
 if grep -q "^devicetree /${COMPOSED_DTB_NAME}\$" "$TARGET_ENTRY"; then
-    info "3.1 'devicetree' ya está en boot entry (skip)"
+    info "3.1 'devicetree' already present in boot entry (skip)"
 else
-    # Quitar primero cualquier línea devicetree previa que apunte a otro DTB
+    # First strip any previous devicetree line pointing to a different DTB
     sudo sed -i '/^devicetree /d' "$TARGET_ENTRY"
     echo "devicetree /${COMPOSED_DTB_NAME}" | sudo tee -a "$TARGET_ENTRY" >/dev/null
-    info "3.1 'devicetree /${COMPOSED_DTB_NAME}' añadido a boot entry"
+    info "3.1 'devicetree /${COMPOSED_DTB_NAME}' added to boot entry"
 fi
 
 if grep -q 'video=DSI-1' "$TARGET_ENTRY"; then
-    info "3.2 'video=DSI-1' ya en options (skip)"
+    info "3.2 'video=DSI-1' already in options (skip)"
 else
     sudo sed -i 's|^\(options[[:space:]].*\)$|\1 video=DSI-1:480x800@60 video=DP-1:d|' "$TARGET_ENTRY"
-    info "3.2 'video=DSI-1:480x800@60 video=DP-1:d' añadido a options"
+    info "3.2 'video=DSI-1:480x800@60 video=DP-1:d' added to options"
 fi
 
-# -------------------- FASE 4: instalar xorg snippets ------------------------
-section "FASE 4: xorg snippets (rotación + calibración touch)"
+# -------------------- PHASE 4: install xorg snippets ------------------------
+section "PHASE 4: xorg snippets (rotation + touch calibration)"
 
 sudo mkdir -p /etc/X11/xorg.conf.d/
 
 sudo tee "$XORG_MONITOR" >/dev/null <<'XORG_MONITOR_EOF'
-# Display del GIGA Display Shield rotado landscape "right".
-# Para rotación contraria usar "left".
-# Definimos ambos DSI-1 y DP-1 porque el kernel puede exponer el conector con
-# distinto nombre según la versión del DRM driver.
+# GIGA Display Shield rotated landscape "right".
+# Use "left" for the opposite rotation.
+# We define both DSI-1 and DP-1 because the kernel may expose the connector under
+# either name depending on the DRM driver version.
 Section "Monitor"
     Identifier "DSI-1"
     Option "Rotate" "right"
@@ -259,12 +259,12 @@ Section "Screen"
     Device "Card0"
 EndSection
 XORG_MONITOR_EOF
-info "4.1 $XORG_MONITOR instalado"
+info "4.1 $XORG_MONITOR installed"
 
 sudo tee "$XORG_TOUCH" >/dev/null <<'XORG_TOUCH_EOF'
-# Calibración del touch GT911 para el display DSI-1 rotado "right".
-# Matriz derivada empíricamente capturando 4 esquinas con evtest, normalizada
-# al abs_max=479/799 del chip GT911.
+# GT911 touch calibration for the DSI-1 display rotated "right".
+# Matrix derived empirically by capturing the four corners with evtest, normalised
+# to the GT911 abs_max=479/799.
 Section "InputClass"
     Identifier "Goodix Touch Calibration"
     MatchProduct "Goodix Capacitive TouchScreen"
@@ -272,28 +272,28 @@ Section "InputClass"
     Option "TransformationMatrix" "0 1.175 -0.103 -1.312 0 1.096 0 0 1"
 EndSection
 XORG_TOUCH_EOF
-info "4.2 $XORG_TOUCH instalado"
+info "4.2 $XORG_TOUCH installed"
 
 # -------------------- final -------------------------------------------------
-section "Configuración completa"
-info "Cambios aplicados:"
-info "  ✓ módulo parchado panel-sitronix-st7701.ko en $KO_TARGET"
-info "  ✓ DTB compuesto (base + overlay GIGA) en $COMPOSED_DTB"
-info "  ✓ boot entry $TARGET_ENTRY editado (devicetree + video=DSI-1)"
-info "  ✓ $XORG_MONITOR (rotación landscape)"
-info "  ✓ $XORG_TOUCH (calibración)"
+section "Configuration complete"
+info "Changes applied:"
+info "  ✓ patched panel-sitronix-st7701.ko module at $KO_TARGET"
+info "  ✓ composed DTB (base + GIGA overlay) at $COMPOSED_DTB"
+info "  ✓ boot entry $TARGET_ENTRY edited (devicetree + video=DSI-1)"
+info "  ✓ $XORG_MONITOR (landscape rotation)"
+info "  ✓ $XORG_TOUCH (calibration)"
 echo
-info "Backup del boot entry original: $BACKUP_ENTRY"
-info "Backup del módulo original:     $KO_BACKUP"
-info "Para revertir TODO: $0 --revert"
+info "Original boot entry backup: $BACKUP_ENTRY"
+info "Original module backup:     $KO_BACKUP"
+info "To revert EVERYTHING: $0 --revert"
 
 if [ "$DO_REBOOT" -eq 1 ]; then
     echo
-    info "Reiniciando en 5 segundos para que los cambios tomen efecto…"
-    info "(Ctrl+C para cancelar; podrás reiniciar manualmente con 'sudo reboot')"
+    info "Rebooting in 5 seconds for changes to take effect…"
+    info "(Ctrl+C to cancel; reboot manually later with 'sudo reboot')"
     sleep 5
     sudo reboot
 else
     echo
-    info "--no-reboot especificado. Reinicia manualmente con 'sudo reboot' para activar los cambios."
+    info "--no-reboot specified. Reboot manually with 'sudo reboot' to activate the changes."
 fi
