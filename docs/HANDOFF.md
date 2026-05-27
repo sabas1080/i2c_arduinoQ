@@ -427,3 +427,83 @@ export SSHPASS='arduino1334'
 - Borrar `~/kernel-source` y `~/compiling_goodix` del device (leftovers del intento del equipo de soporte, ~2 GB)
 - Borrar `~/Documents/electroniccats/linux-qcom-build/` del PC (cross-compile ya no necesario, ~5-7 GB)
 - Considerar reportar a Arduino/upstream: el DTS de UNO Q que viene de fábrica podría incluir el nodo gt911 con flags correctos así nadie más cae en esto.
+
+---
+
+## 13. Soporte para kernel 7.0.0 (2026-05-26 ~tarde)
+
+Las secciones §11 y §12 documentan el trabajo en kernel **6.16.7**. La imagen Arduino oficial publicada después de mayo 2026 viene con **kernel 7.0.0-g122c2c22d838** como default y 6.16.7 como respaldo. Esta sección documenta el soporte para correr el GIGA Display Shield en 7.0.0.
+
+### 13.1 El problema en 7.0.0
+
+Al portar el árbol del kernel desde la rama `qcom-v6.16.7-unoq` a `qcom-v7.0.0-unoq`, Arduino **eliminó el descriptor del panel del GIGA shield** del driver `drivers/gpu/drm/panel/panel-sitronix-st7701.c`. Verificación directa del source en GitHub:
+
+| | qcom-v6.16.7-unoq | qcom-v7.0.0-unoq |
+|---|---|---|
+| Función `arduino_giga_display_gip_sequence` | ✓ presente (L523) | ✗ removida |
+| Struct `arduino_giga_display_mode` (480×800) | ✓ presente (L665) | ✗ removido (reemplazado por `wf40eswaa6mnn0_mode` 480×480) |
+| Struct `arduino_giga_display_desc` | ✓ presente (L684) | ✗ removido |
+| Entry en `st7701_dsi_of_match[]` con `arduino_giga_display_desc` | ✓ presente (L1340) | ✗ removida |
+
+Sin el descriptor, el driver `panel-sitronix-st7701.ko` NO sabe cómo configurar el panel (timings, gamma, init sequence, voltages). El boot del kernel 7.0.0 con un DTB que declara el panel del GIGA shield resulta en panel no inicializado.
+
+Adicionalmente, el ecosistema 7.0.0:
+- Nuevo modelo de DTB modular: `qrb2210-arduino-imola-base.dtb` + overlays `.dtbo`
+- Nueva herramienta `arduino-linux-config carrier enable` para activar overlays
+- Carriers disponibles: `5-dsi-touch-a`, `8-dsi-touch-a`, `10-dsi-touch-a` (todos Waveshare, NO el GIGA shield)
+
+### 13.2 El fix
+
+Dos cambios complementarios:
+
+**(a) Backport del descriptor al módulo del kernel:**
+Re-añadir `arduino_giga_display_*` (function + mode + desc + entries en of_match) al `panel-sitronix-st7701.c` del branch 7.0.0. La struct `st7701_panel_desc` es byte-compatible entre branches, así que el descriptor del 6.16.7 funciona literal en 7.0.0 sin traducción.
+
+**(b) Overlay device-tree custom:**
+Escribir un `.dtso` que active `mdss_dsi0` con el panel `arduino,giga-display` + añada el node `gt911@14` al bus i2c0 con los GPIO flags correctos (`GPIO_ACTIVE_HIGH=0`). Componer con `fdtoverlay` sobre el `qrb2210-arduino-imola-base.dtb`.
+
+### 13.3 Componentes del fix (en este repo)
+
+| Archivo | Propósito |
+|---|---|
+| `scripts/enable-gigadisplay-shield.sh` | Bootstrap. Se corre ON-DEVICE en el UNO Q. Instala módulo, compone DTB, edita boot entry, instala xorg snippets, reboot. |
+| `scripts/gigadisplay-shield.dtso` | Overlay device-tree source. Compila a `.dtbo` en device con `dtc` y se aplica con `fdtoverlay`. |
+| `scripts/panel-sitronix-st7701.ko` | Módulo cross-compilado con el descriptor backportado (binario). |
+| `scripts/build-st7701-patched-ko.sh` | Helper para devs: clona arduino/linux-qcom@qcom-v7.0.0-unoq, aplica el patch al st7701 driver, cross-compila el módulo. Solo necesario cuando Arduino actualice el kernel 7.0.0. |
+
+### 13.4 Uso para usuarios finales
+
+Copiar `scripts/{enable-gigadisplay-shield.sh, gigadisplay-shield.dtso, panel-sitronix-st7701.ko}` al UNO Q (via SSH, adb push, USB stick, etc.) y ejecutar:
+
+```bash
+chmod +x enable-gigadisplay-shield.sh
+./enable-gigadisplay-shield.sh
+```
+
+El script pide sudo una vez al inicio, hace todo lo demás automáticamente, y reinicia. Después del reboot el display + touch funcionan con el kernel driver original (más nuestro módulo `st7701` parchado).
+
+Para revertir: `./enable-gigadisplay-shield.sh --revert`.
+
+### 13.5 Rebuild del módulo cuando Arduino actualice 7.0.0
+
+El módulo `panel-sitronix-st7701.ko` shipped en el repo está cross-compilado contra el kernel 7.0.0-g122c2c22d838 actual. Si Arduino publica una actualización del paquete `linux-image-7.0.0` con un commit SHA distinto, el vermagic del módulo dejará de matchear y modprobe rechazará la carga.
+
+Para regenerar el módulo contra el kernel actualizado:
+
+```bash
+# En la PC dev:
+export SSHPASS='Arduino1334'   # password SSH del UNO Q
+export UNOQ_IP='192.168.0.149'
+./scripts/build-st7701-patched-ko.sh
+```
+
+El script clona arduino/linux-qcom rama qcom-v7.0.0-unoq, aplica nuestro patch al st7701 driver, baja el .config del kernel running del device, cross-compila, ajusta el vermagic via binary patch, y deja el nuevo `.ko` listo en `scripts/`.
+
+### 13.6 Contribución upstream (TODO)
+
+El fix lógico de largo plazo es contribuir el descriptor del GIGA shield al árbol oficial de Arduino:
+
+- PR a [`arduino/linux-qcom`](https://github.com/arduino/linux-qcom) rama `qcom-v7.0.0-unoq`: cherry-pick del commit que añadió `arduino_giga_display_desc` en 6.16.7
+- PR a [`arduino/arduino-linux-config`](https://github.com/arduino/arduino-linux-config): añadir un carrier `gigadisplay-shield` que aplique nuestro overlay
+
+Una vez ambos PRs mergeados y la imagen Arduino actualizada, el bootstrap se reducirá a `arduino-linux-config carrier enable media-carrier display=gigadisplay-shield` y el reinstalable manual desaparece.
