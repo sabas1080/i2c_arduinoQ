@@ -98,6 +98,7 @@ i2c_arduinoQ/
    regex:192\.168\.0\.(105|149|184)==>192.168.0.XXX
    regex:/home/sabas/==>/path/to/repo/
    ```
+   This only redacts blob *content* across all commits. File-level history of the deleted obsolete files (PDFs, old scripts, HANDOFF.md, etc.) remains in the rewritten log — that's intentional, the deletions show as normal commits and don't carry any secrets. We do not use `--invert-paths` because the goal is scrubbing leaks, not erasing the project's evolution.
 4. **Force-push** with `--force-with-lease` to `origin main`. Acceptable because there are no known external forks/clones.
 5. **Reinforce `.gitignore`** to prevent re-leaks (see §5).
 6. **Optional follow-up:** add `gitleaks` pre-commit hook (config in `.gitleaks.toml`).
@@ -214,7 +215,7 @@ Trigger: pull_request, push to main. Runs `shellcheck scripts/**/*.sh tools/**/*
 4. Add `LICENSE`, `CONTRIBUTING.md`, `CHANGELOG.md`, issue/PR templates.
 5. Add CI workflows.
 6. Move `build-st7701-patched-ko.sh` → `tools/dev/build-panel-module.sh`, scrub defaults.
-7. Extract the panel module diff into `kernel/panel-sitronix-st7701.patch`. Capture the running kernel `.config` into `kernel/configs/uno-q-7.0.0.config`.
+7. Extract the panel module diff into `kernel/panel-sitronix-st7701.patch`. The patch currently lives inline in `scripts/build-st7701-patched-ko.sh` (as a heredoc + Python OFMATCH insertion); extract it into a real unified diff that `git apply` / `patch -p1` can consume directly. Capture the running kernel `.config` into `kernel/configs/uno-q-7.0.0.config`.
 8. Delete obsolete scripts, PDFs, docx, notes/, HANDOFF.md, docs/superpowers/.
 9. Local commit of all the above as "chore: prepare for public release".
 10. Run `git filter-repo` with the replacements file from §6.
