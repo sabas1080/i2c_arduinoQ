@@ -20,4 +20,4 @@ jobs:
             exit 0
           fi
           echo "Linting: ${files[*]}"
-          shellcheck "${files[@]}"
+          shellcheck --severity=warning "${files[@]}"

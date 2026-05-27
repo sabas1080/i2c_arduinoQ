@@ -104,6 +104,7 @@ info "Requesting sudo privileges…"
 sudo -v || fail "sudo not granted."
 ( while true; do sudo -nv 2>/dev/null; sleep 60; done ) &
 SUDO_KEEPALIVE_PID=$!
+# shellcheck disable=SC2064  # we want immediate expansion of $SUDO_KEEPALIVE_PID at trap-registration time
 trap "kill $SUDO_KEEPALIVE_PID 2>/dev/null || true" EXIT
 
 # Locate boot entry for 7.0.0
@@ -181,6 +182,7 @@ section "PHASE 2: compile overlay + compose DTB"
 
 TMP_DTBO=$(mktemp --suffix=.dtbo)
 TMP_OUT=$(mktemp --suffix=.dtb)
+# shellcheck disable=SC2064  # we want immediate expansion of $TMP_DTBO, $TMP_OUT, $SUDO_KEEPALIVE_PID
 trap "rm -f '$TMP_DTBO' '$TMP_OUT'; kill $SUDO_KEEPALIVE_PID 2>/dev/null || true" EXIT
 
 # 2.1 compile dtso → dtbo

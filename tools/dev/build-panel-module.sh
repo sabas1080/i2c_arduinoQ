@@ -167,7 +167,7 @@ fi
 section "Build (may take 20-40 min)"
 cp "${BUILD_DIR}/config-${KERNEL_TARGET}" .config
 make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig >/dev/null
-make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc) 2>&1 | tail -5
+make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j"$(nproc)" 2>&1 | tail -5
 
 KO=drivers/gpu/drm/panel/panel-sitronix-st7701.ko
 [ -f "$KO" ] || fail "build did not produce $KO"
