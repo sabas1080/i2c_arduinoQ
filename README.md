@@ -1,83 +1,110 @@
-# Arduino UNO Q + GIGA Display Shield — soporte completo
+# Arduino UNO Q + GIGA Display Shield — Full Linux Support
 
-Soporte del **Arduino GIGA Display Shield** (ASX00039) — panel DSI 480×800 + touch GT911 — sobre el **Arduino UNO Q** (ABX00162, Qualcomm QRB2210) en Linux.
+End-to-end support for the **Arduino GIGA Display Shield** (ASX00039) — 480×800 DSI panel and GT911 capacitive touch — running on the **Arduino UNO Q** (ABX00162, Qualcomm QRB2210, Debian-based Arduino image, kernel 7.0.0).
 
-## Estado actual
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Kernel: 7.0.0](https://img.shields.io/badge/kernel-7.0.0--g122c2c22d838-informational)](kernel/README.md)
+[![CI](https://github.com/sabas1080/i2c_arduinoQ/actions/workflows/build-panel-module.yml/badge.svg)](https://github.com/sabas1080/i2c_arduinoQ/actions/workflows/build-panel-module.yml)
 
-| | Kernel 6.16.7 | Kernel 7.0.0 |
-|---|---|---|
-| Display DSI 480×800 | ✓ funciona con DTB del paquete oficial + GPIO flags corregidos | ✓ funciona con módulo `panel-sitronix-st7701.ko` parchado |
-| Touch GT911 (I2C 0x14) | ✓ funciona con `goodix_ts.ko` original + DT con flags GPIO correctos | ✓ idem |
-| Cursor X11 calibrado | ✓ rotación landscape "right" + matriz de calibración | ✓ idem |
+![hero](docs/images/wiring.jpg)
 
-Solo se necesita correr **un script** en el device para habilitar todo.
+## What this does
 
-## Uso rápido (community)
+One on-device script:
 
-En una UNO Q virgen con la imagen Arduino oficial (kernel 7.0.0 default; 6.16.7 también pre-instalado):
+- Installs a **patched `panel-sitronix-st7701.ko`** that brings back the GIGA panel descriptor Arduino removed in kernel 7.0.0.
+- Applies a **device-tree overlay** that adds the GT911 touch node and binds the patched panel.
+- Edits the **systemd-boot entry** to load the composed DTB and pin the DSI mode to 480×800@60.
+- Installs **xorg snippets** for landscape rotation and touch calibration.
+
+Run, reboot, the screen lights up, the touch works.
+
+## Status
+
+| Feature | Kernel 7.0.0-g122c2c22d838 |
+|---|---|
+| DSI panel (480×800) | ✓ patched panel-sitronix-st7701 module |
+| GT911 touch (I²C 0x14) | ✓ stock `goodix_ts` driver via overlay |
+| X11 cursor (landscape, calibrated) | ✓ |
+
+> Kernel 6.16.7 was the original development target and is no longer supported by this release. The 6.16.7 path remains in git history; see [`docs/how-it-works.md` § Project history](docs/how-it-works.md#5-project-history).
+
+## Quick start
+
+You will need:
+- An Arduino UNO Q running the official Arduino image with kernel `7.0.0-g122c2c22d838` (default on current images).
+- An Arduino GIGA Display Shield.
+- Six jumper wires for the touch lines. See [`docs/wiring.md`](docs/wiring.md) for the pinout.
+
+Steps:
+
+1. **Wire the touch lines** following [`docs/wiring.md`](docs/wiring.md). Verify with `i2cdetect -y 0` — address `0x14` should appear.
+2. **Download the latest release bundle** from [Releases](https://github.com/sabas1080/i2c_arduinoQ/releases/latest):
+   - `enable-gigadisplay-shield.sh`
+   - `validate-gigadisplay-shield.sh`
+   - `gigadisplay-shield.dtso`
+   - `panel-sitronix-st7701-7.0.0-g122c2c22d838.ko`
+   - `SHA256SUMS`
+3. **Copy to the UNO Q** by your preferred method (scp / adb push / USB stick), keeping all four files in the same directory.
+4. **Verify the .ko checksum:**
+   ```bash
+   sha256sum -c SHA256SUMS
+   ```
+5. **Rename the .ko** so the install script finds it:
+   ```bash
+   mv panel-sitronix-st7701-*.ko panel-sitronix-st7701.ko
+   ```
+6. **Run the installer** (asks for sudo once):
+   ```bash
+   chmod +x enable-gigadisplay-shield.sh validate-gigadisplay-shield.sh
+   ./enable-gigadisplay-shield.sh
+   ```
+   It reboots when done.
+7. **After reboot, verify:**
+   ```bash
+   ./validate-gigadisplay-shield.sh
+   ```
+   Expect `14/14 PASS`. Anything less, see [`docs/troubleshooting.md`](docs/troubleshooting.md).
+
+## How it works
+
+Three pieces stitched together:
+
+1. The `panel-sitronix-st7701` driver gets a patch that reintroduces the GIGA panel descriptor Arduino dropped in 7.0.0.
+2. A device-tree overlay adds the GT911 touch node and points the DSI panel at the new descriptor.
+3. The boot loader entry loads the composed DTB and pins the DSI mode.
+
+Full explanation with rationale: [`docs/how-it-works.md`](docs/how-it-works.md).
+
+## Reverting
 
 ```bash
-# Copiar el package al device (via SSH propio, adb push, o USB stick):
-scp scripts/{enable-gigadisplay-shield.sh,gigadisplay-shield.dtso,panel-sitronix-st7701.ko} arduino@<IP>:/tmp/
-
-# En el device, ejecutar:
-ssh arduino@<IP>
-cd /tmp
-chmod +x enable-gigadisplay-shield.sh
-./enable-gigadisplay-shield.sh
+./enable-gigadisplay-shield.sh --revert
+sudo reboot
 ```
 
-Pide sudo una vez al inicio. Hace todo automáticamente (~1 minuto + reboot). Después del reboot, el display muestra el escritorio y el touch funciona en X11.
+Restores the original panel module, removes the composed DTB, cleans the boot entry, removes the xorg snippets.
 
-Para revertir todo: `./enable-gigadisplay-shield.sh --revert`.
+## Troubleshooting
 
-Para verificar que todo está activo tras el reboot:
-```bash
-./validate-gigadisplay-shield.sh
-```
-Imprime un reporte por componente (kernel, módulos, DSI panel, GT911 touch, IRQs, X11) con ✓ / ✗ por cada check.
+See [`docs/troubleshooting.md`](docs/troubleshooting.md) — indexed by symptom.
 
-## Cómo funciona
+## Licensing
 
-El script `enable-gigadisplay-shield.sh`:
-1. Instala un módulo `panel-sitronix-st7701.ko` parchado que reintroduce el descriptor del panel del GIGA shield (Arduino lo removió del driver en kernel 7.0.0).
-2. Compila el overlay `gigadisplay-shield.dtso` con `dtc` y lo aplica con `fdtoverlay` sobre el DTB base del kernel 7.0.0. El overlay declara el panel y el chip touch GT911 con los GPIO flags correctos.
-3. Edita el boot loader entry de systemd-boot para cargar el DTB compuesto.
-4. Instala xorg snippets (`/etc/X11/xorg.conf.d/`) para rotación landscape y calibración del touch.
-5. Reinicia.
+- **Project license: MIT** for original code and documentation (`LICENSE`).
+- **`scripts/gigadisplay-shield.dtso`** is licensed `GPL-2.0+ OR BSD-3-Clause` per the kernel DTS convention (SPDX header at the top of the file).
+- **`kernel/panel-sitronix-st7701.patch`** is licensed `GPL-2.0+ OR BSD-3-Clause` because it derives from the upstream `panel-sitronix-st7701.c` driver.
+- **The `.ko` binary** distributed via GitHub Releases is GPL-2.0 (compiled from the GPL kernel sources). Redistribution must satisfy the kernel's GPL obligations — this repo satisfies them by shipping the patch and the public CI recipe.
 
-Para entender el porqué del módulo parchado y los detalles del bug original de los GPIO flags, ver [`docs/HANDOFF.md`](docs/HANDOFF.md) §12 y §13.
+If you reuse pieces of this repo, MIT covers the scripts and docs cleanly; the kernel-derived files carry GPL obligations independent of the MIT umbrella.
 
-## Para developers
+## Credits
 
-Si Arduino actualiza el kernel 7.0.0 y la imagen pre-instalada cambia de commit SHA, el vermagic del `.ko` shipped en el repo dejará de matchear. Para regenerar:
+- **Electronic Cats** — host community, hardware support.
+- **Arduino** — official UNO Q image and kernel source ([arduino/linux-qcom](https://github.com/arduino/linux-qcom)).
+- **Goodix** — GT911 datasheet.
+- **Linux drm-misc** — upstream `panel-sitronix-st7701` driver.
 
-```bash
-# En la PC dev (necesita gcc-aarch64-linux-gnu, libelf-dev, etc.):
-export SSHPASS='<password-del-uno-q>'
-export UNOQ_IP='<IP-del-uno-q>'
-./scripts/build-st7701-patched-ko.sh
-```
+## Contributing
 
-Tarda 20-40 minutos. Output: `scripts/panel-sitronix-st7701.ko` actualizado.
-
-## Archivos importantes
-
-- `scripts/enable-gigadisplay-shield.sh` — bootstrap principal (corre on-device)
-- `scripts/gigadisplay-shield.dtso` — device-tree overlay para el shield
-- `scripts/panel-sitronix-st7701.ko` — módulo kernel parchado (binario)
-- `scripts/validate-gigadisplay-shield.sh` — diagnóstico post-bootstrap
-- `scripts/build-st7701-patched-ko.sh` — helper para devs (rebuild del módulo)
-- `docs/HANDOFF.md` — documento técnico extenso con el análisis completo del bug, los caminos que probamos, y por qué hay un módulo parchado
-
-## Hardware
-
-- **Arduino UNO Q** (ABX00162) — Qualcomm QRB2210, 2GB RAM, eMMC, Debian 13
-- **Arduino GIGA Display Shield** (ASX00039) — DSI 480×800 panel ST7701 + touch GT911 + IMU + audio + microSD
-
-Sin level shifter — el bus I2C opera a 1.9V swing marginal pero empíricamente funciona con cableado corto. Conexión manual entre el shield y los pines JMEDIA del UNO Q (ver §4 del HANDOFF.md para tabla de cableado).
-
-## Licencia
-
-Patches al kernel: GPL-2.0+ OR BSD-3-Clause (igual al driver original).
-Scripts: ver headers individuales.
+See [`CONTRIBUTING.md`](CONTRIBUTING.md).
