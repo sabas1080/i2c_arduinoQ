@@ -1,25 +1,25 @@
 #!/usr/bin/env bash
-# build-st7701-patched-ko.sh — clona arduino/linux-qcom@qcom-v7.0.0-unoq,
-# aplica el patch que reintroduce arduino_giga_display_desc al driver
-# panel-sitronix-st7701, y cross-compila el módulo .ko.
+# build-panel-module.sh — clones arduino/linux-qcom@qcom-v7.0.0-unoq,
+# applies the patch that reintroduces arduino_giga_display_desc to the
+# panel-sitronix-st7701 driver, and cross-compiles the .ko module.
 #
-# Output: panel-sitronix-st7701.ko (junto al script, listo para usar por
+# Output: panel-sitronix-st7701.ko (next to the script, ready for use by
 # enable-gigadisplay-shield.sh).
 #
-# === IMPORTANTE ===
-# Este script se corre EN UNA PC dev (no en el UNO Q). Requiere:
+# === IMPORTANT ===
+# Run this script ON A DEV PC (not on the UNO Q). Requires:
 #   - gcc-aarch64-linux-gnu (cross toolchain)
 #   - libelf-dev, libssl-dev, flex, bison, bc, cpio
-#   - El kernel .config del UNO Q running 7.0.0 (se obtiene via SSH)
-#   - ~5 GB de disco libre (~2 GB clone + ~3 GB build artifacts)
+#   - The kernel .config from a UNO Q running 7.0.0 (fetched via SSH)
+#   - ~5 GB of free disk space (~2 GB clone + ~3 GB build artifacts)
 #
-# Solo es necesario re-correrlo cuando Arduino actualice el kernel 7.0.0.
-# El .ko shipped en el repo se construye con este script.
+# Only needs to be re-run when Arduino updates the 7.0.0 kernel.
+# The .ko shipped in the repo is built with this script.
 #
-# Uso:
-#   export SSHPASS='Arduino1334'      # password SSH del UNO Q (para traer .config)
-#   export UNOQ_IP='192.168.0.149'    # IP del UNO Q (cualquiera con 7.0.0)
-#   ./scripts/build-st7701-patched-ko.sh
+# Usage:
+#   export SSHPASS='<your-uno-q-password>'   # SSH password of the UNO Q
+#   export UNOQ_IP='<your-uno-q-ip>'         # IP of any UNO Q running 7.0.0
+#   ./tools/dev/build-panel-module.sh
 
 set -euo pipefail
 
@@ -29,43 +29,43 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_DIR="${BUILD_DIR:-/tmp/st7701-build-$$}"
 OUTPUT_KO="${SCRIPT_DIR}/panel-sitronix-st7701.ko"
 
-UNOQ_IP="${UNOQ_IP:-192.168.0.149}"
+UNOQ_IP="${UNOQ_IP:?set UNOQ_IP to the IP of a UNO Q running the target kernel}"
 UNOQ_USER="${UNOQ_USER:-arduino}"
 
 section() { echo; echo "==> $*"; echo "----------------------------------------------------------------"; }
 info()    { echo "    $*"; }
 fail()    { echo "ERROR: $*" >&2; exit 1; }
 
-section "Verificación de prerequisites"
+section "Prerequisite verification"
 for cmd in git aarch64-linux-gnu-gcc make sshpass scp ssh python3; do
-    command -v "$cmd" >/dev/null || fail "comando '$cmd' no encontrado. Instala build-essential, gcc-aarch64-linux-gnu, sshpass."
+    command -v "$cmd" >/dev/null || fail "command '$cmd' not found. Install build-essential, gcc-aarch64-linux-gnu, sshpass."
 done
 for pkg in libelf-dev libssl-dev flex bison bc cpio; do
     dpkg -l "$pkg" 2>/dev/null | grep -q "^ii" \
-      || fail "paquete '$pkg' faltante. Instala: sudo apt-get install $pkg"
+      || fail "package '$pkg' missing. Install with: sudo apt-get install $pkg"
 done
-info "tools y deps OK"
+info "tools and deps OK"
 
-[ -n "${SSHPASS:-}" ] || fail "exporta SSHPASS antes de correr"
+[ -n "${SSHPASS:-}" ] || fail "export SSHPASS before running"
 
-section "Trayendo .config del UNO Q ($UNOQ_USER@$UNOQ_IP)"
+section "Fetching .config from UNO Q ($UNOQ_USER@$UNOQ_IP)"
 mkdir -p "$BUILD_DIR"
 sshpass -e scp -o StrictHostKeyChecking=accept-new \
     "${UNOQ_USER}@${UNOQ_IP}:/boot/config-${KERNEL_TARGET}" \
     "${BUILD_DIR}/config-${KERNEL_TARGET}" \
-    || fail "no pude traer el .config"
-info "config descargado"
+    || fail "could not fetch .config"
+info "config downloaded"
 
-section "Clonando arduino/linux-qcom rama ${KERNEL_BRANCH}"
+section "Cloning arduino/linux-qcom branch ${KERNEL_BRANCH}"
 cd "$BUILD_DIR"
 [ -d linux-qcom ] || git clone --branch "$KERNEL_BRANCH" --depth 1 https://github.com/arduino/linux-qcom.git linux-qcom
 
-section "Aplicando patch arduino,giga-display al st7701 driver"
+section "Applying arduino,giga-display patch to the st7701 driver"
 cd "$BUILD_DIR/linux-qcom"
 SRC_FILE=drivers/gpu/drm/panel/panel-sitronix-st7701.c
 
 if grep -q "arduino_giga_display_desc" "$SRC_FILE"; then
-    info "patch ya aplicado (skip)"
+    info "patch already applied (skip)"
 else
     python3 - "$SRC_FILE" <<'PYEOF'
 import re, sys
@@ -160,19 +160,19 @@ if old not in src: sys.exit("ERROR: no of_match anchor")
 src = src.replace(old, new)
 
 with open(f, "w") as fh: fh.write(src)
-print("patch aplicado OK")
+print("patch applied OK")
 PYEOF
 fi
 
-section "Build (puede tardar 20-40 min)"
+section "Build (may take 20-40 min)"
 cp "${BUILD_DIR}/config-${KERNEL_TARGET}" .config
 make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig >/dev/null
 make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc) 2>&1 | tail -5
 
 KO=drivers/gpu/drm/panel/panel-sitronix-st7701.ko
-[ -f "$KO" ] || fail "build no produjo $KO"
+[ -f "$KO" ] || fail "build did not produce $KO"
 
-section "Vermagic binary-patch"
+section "Vermagic binary patch"
 NEW_SHA=$(git rev-parse HEAD 2>/dev/null | cut -c1-12 || echo "")
 TARGET_SHA=$(echo "$KERNEL_TARGET" | sed 's/^.*-g//')
 python3 - "$KO" "$NEW_SHA" "$TARGET_SHA" <<'PYEOF'
