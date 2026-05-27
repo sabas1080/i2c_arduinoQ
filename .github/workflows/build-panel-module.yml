@@ -1,0 +1,103 @@
+name: build panel module
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    env:
+      KERNEL_REPO: arduino/linux-qcom
+      KERNEL_BRANCH: qcom-v7.0.0-unoq
+      KERNEL_RELEASE: 7.0.0-g122c2c22d838
+
+    steps:
+      - name: Checkout this repo
+        uses: actions/checkout@v4
+
+      - name: Install host build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            gcc-aarch64-linux-gnu \
+            libelf-dev libssl-dev \
+            flex bison bc cpio \
+            ccache
+
+      - name: Resolve kernel branch SHA
+        id: kernel-sha
+        run: |
+          SHA=$(git ls-remote "https://github.com/${KERNEL_REPO}.git" "refs/heads/${KERNEL_BRANCH}" | awk '{print $1}')
+          if [ -z "$SHA" ]; then
+            echo "::error::Could not resolve ${KERNEL_BRANCH} on ${KERNEL_REPO}"
+            exit 1
+          fi
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "Kernel SHA: $SHA"
+
+      - name: Restore kernel build cache
+        id: kernel-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            kbuild
+            ~/.ccache
+          key: kernel-${{ steps.kernel-sha.outputs.sha }}-${{ hashFiles('kernel/panel-sitronix-st7701.patch', 'kernel/configs/uno-q-7.0.0.config') }}
+
+      - name: Clone kernel and apply patch (cache miss)
+        if: steps.kernel-cache.outputs.cache-hit != 'true'
+        run: |
+          git clone --branch "${KERNEL_BRANCH}" --depth 200 \
+            "https://github.com/${KERNEL_REPO}.git" kbuild
+          cd kbuild
+          git apply ../kernel/panel-sitronix-st7701.patch
+          cp ../kernel/configs/uno-q-7.0.0.config .config
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
+
+      - name: Build kernel modules
+        run: |
+          cd kbuild
+          export PATH="/usr/lib/ccache:$PATH"
+          ccache -z
+          make -j"$(nproc)" \
+            ARCH=arm64 \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CC="ccache aarch64-linux-gnu-gcc" \
+            modules
+          ccache -s
+
+      - name: Extract and strip panel module
+        run: |
+          mkdir -p artifacts
+          KO_SRC=kbuild/drivers/gpu/drm/panel/panel-sitronix-st7701.ko
+          KO_OUT="artifacts/panel-sitronix-st7701-${KERNEL_RELEASE}.ko"
+          aarch64-linux-gnu-strip --strip-debug "$KO_SRC" -o "$KO_OUT"
+          ls -la "$KO_OUT"
+          (cd artifacts && sha256sum "panel-sitronix-st7701-${KERNEL_RELEASE}.ko" > SHA256SUMS)
+          cat artifacts/SHA256SUMS
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: panel-module-${{ env.KERNEL_RELEASE }}
+          path: artifacts/
+
+      - name: Publish to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/panel-sitronix-st7701-${{ env.KERNEL_RELEASE }}.ko
+            artifacts/SHA256SUMS
+            scripts/enable-gigadisplay-shield.sh
+            scripts/validate-gigadisplay-shield.sh
+            scripts/gigadisplay-shield.dtso
+          fail_on_unmatched_files: true
+          generate_release_notes: true
