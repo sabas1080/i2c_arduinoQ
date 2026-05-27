@@ -65,7 +65,8 @@ i2c_arduinoQ/
 │   ├── wiring.md                      # Pinout table + photos
 │   └── images/                        # Wiring photo, evtest screenshot, X11 cursor demo
 ├── scripts/
-│   ├── enable-gigadisplay-shield.sh   # The entry point (idempotent, --revert)
+│   ├── enable-gigadisplay-shield.sh   # The install entry point (idempotent, --revert)
+│   ├── validate-gigadisplay-shield.sh # Post-reboot verifier — 14 checks, exit 0 on PASS
 │   └── gigadisplay-shield.dtso        # Device-tree overlay source
 ├── kernel/
 │   ├── panel-sitronix-st7701.patch    # Patch reintroducing arduino_giga_display_desc
@@ -88,6 +89,10 @@ i2c_arduinoQ/
 ### Files relocated
 
 - `scripts/build-st7701-patched-ko.sh` → `tools/dev/build-panel-module.sh`, defaults scrubbed (no hardcoded password/IP), purely a maintainer convenience that mirrors the CI workflow.
+
+### Files untracked (moved out of git, kept as Release artifacts)
+
+- `scripts/panel-sitronix-st7701.ko` — currently tracked in commit `85805fa` (~130KB binary). In Phase A we `git rm` it and add `*.ko` to `.gitignore`. The canonical distribution channel becomes the GitHub Release attached by CI, with verifiable SHA256. Rationale: avoid binary bloat in clones; GPL obligations are satisfied by shipping `kernel/panel-sitronix-st7701.patch` + the public CI recipe that anyone can re-run.
 
 ## 6. Secrets & data scrubbing
 
@@ -153,7 +158,10 @@ One paragraph: DSI panel + GT911 touch + X11 calibration end-to-end.
 5. Reboot. Done.
 
 ## Verification
-evtest + xinput commands.
+```bash
+./validate-gigadisplay-shield.sh
+```
+Prints a 14-check report (board id, kernel, panel module, DSI panel, goodix_ts binding, IRQs, X11 device). Exit 0 means everything is up. Manual deep-dive: `evtest /dev/input/event*` and `xinput list`.
 
 ## How it works (1-2 paragraphs + link)
 → docs/how-it-works.md
@@ -265,7 +273,7 @@ A7. **Extract the panel patch to a self-contained unified diff** (`kernel/panel-
 
 A8. **Capture the running kernel `.config`** from a UNO Q at the target kernel into `kernel/configs/uno-q-7.0.0.config` (used by CI).
 
-A9. **Delete obsolete tree:** PDFs, `Test Shield-Adapter.docx` (currently tracked in git since the initial commit `e969770`; needs `git rm`, not just leaving aside), `docs/HANDOFF.md`, `docs/superpowers/`, `notes/`, and the 12 superseded scripts listed in §5.
+A9. **Delete obsolete tree and untrack the .ko:** `git rm` the PDFs, `Test Shield-Adapter.docx` (tracked since `e969770`), `docs/HANDOFF.md`, `docs/superpowers/`, `notes/`, the 12 superseded scripts listed in §5, **and `scripts/panel-sitronix-st7701.ko`** (currently tracked in `85805fa`, ~130KB binary; moves to Release-only distribution). Update `.gitignore` to include `*.ko`.
 
 A10. **Commit Phase A.** Single or grouped commits as appropriate, ending with a `chore: prepare for public release` head commit.
 
@@ -290,7 +298,7 @@ B5. **Force-push** with `--force-with-lease origin main`.
 
 B6. **Tag `v0.1.0`** and push the tag → triggers the CI workflow that builds and attaches the `.ko` to a fresh GitHub Release.
 
-B7. **End-to-end replication test:** on a freshly-flashed UNO Q, download the Release bundle (`enable-gigadisplay-shield.sh` + `gigadisplay-shield.dtso` + `.ko`) and run the script. Confirm display + touch + X11 all work, with no reference to anything outside the public repo and its Release.
+B7. **End-to-end replication test:** on a freshly-flashed UNO Q, download the Release bundle (`enable-gigadisplay-shield.sh` + `validate-gigadisplay-shield.sh` + `gigadisplay-shield.dtso` + `.ko`) and run the install script. After reboot, run `./validate-gigadisplay-shield.sh` and confirm 14/14 PASS. Verify the only references are to the public repo and its Release — no leftover dependencies on your local workstation.
 
 ## 13. Out-of-scope (deliberate exclusions)
 
