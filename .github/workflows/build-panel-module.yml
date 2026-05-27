@@ -70,7 +70,7 @@ jobs:
             ARCH=arm64 \
             CROSS_COMPILE=aarch64-linux-gnu- \
             CC="ccache aarch64-linux-gnu-gcc" \
-            modules
+            vmlinux modules
           ccache -s
 
       - name: Extract and strip panel module
