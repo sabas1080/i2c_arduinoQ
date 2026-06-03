@@ -48,6 +48,16 @@ if lsmod | grep -q "^panel_sitronix_st7701"; then
     ok "panel-sitronix-st7701 loaded"
 else
     bad "panel-sitronix-st7701 NOT loaded"
+    # Most common cause: the .ko vermagic does not match the running kernel
+    # (e.g. a "-dirty" suffix), so it is rejected at load. Surface it directly.
+    KO=/lib/modules/$(uname -r)/kernel/drivers/gpu/drm/panel/panel-sitronix-st7701.ko
+    if [ -f "$KO" ]; then
+        VM=$(grep -a -o 'vermagic=[^[:cntrl:]]*' "$KO" | head -1 | sed 's/^vermagic=//')
+        KREL=${VM%% *}
+        if [ -n "$KREL" ] && [ "$KREL" != "$(uname -r)" ]; then
+            info "cause: module vermagic '$KREL' != kernel '$(uname -r)' — rejected at load (Invalid module format). Download/rebuild the matching .ko."
+        fi
+    fi
 fi
 
 if lsmod | grep -q "^goodix_ts"; then
