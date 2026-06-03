@@ -64,6 +64,13 @@ jobs:
       - name: Prepare module build headers
         run: |
           cd kbuild
+          # Pin the kernel version string so the module's vermagic matches the
+          # shipped image EXACTLY ("7.0.0-g122c2c22d838"). Without this,
+          # scripts/setlocalversion appends "-dirty" (our `git apply` leaves the
+          # tree modified) and/or a drifting commit sha, producing a vermagic the
+          # running kernel rejects at load time with "Invalid module format".
+          # `.scmversion` is consumed by setlocalversion verbatim and skips git.
+          printf -- '-g%s\n' "${KERNEL_RELEASE##*-g}" > .scmversion
           export PATH="/usr/lib/ccache:$PATH"
           ccache -z
           make -j"$(nproc)" \
@@ -90,6 +97,20 @@ jobs:
             KBUILD_MODPOST_WARN=1 \
             M=drivers/gpu/drm/panel
           ls -la drivers/gpu/drm/panel/panel-sitronix-st7701.ko
+
+      - name: Assert module vermagic matches the target kernel
+        run: |
+          cd kbuild
+          KO=drivers/gpu/drm/panel/panel-sitronix-st7701.ko
+          VM=$(grep -a -o 'vermagic=[^[:cntrl:]]*' "$KO" | head -1)
+          EXPECT="vermagic=${KERNEL_RELEASE} SMP preempt mod_unload aarch64"
+          echo "built:    $VM"
+          echo "expected: $EXPECT"
+          if [ "$VM" != "$EXPECT" ]; then
+            echo "::error::vermagic mismatch — this .ko would be rejected on-device with 'Invalid module format'. A '-dirty' suffix or a drifting commit sha is the usual cause."
+            exit 1
+          fi
+          echo "vermagic OK"
 
       - name: Extract and strip panel module
         run: |

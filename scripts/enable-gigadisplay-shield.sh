@@ -162,6 +162,25 @@ fi
 # -------------------- PHASE 1: install patched module -----------------------
 section "PHASE 1: install patched panel-sitronix-st7701.ko module"
 
+# 1.0 Verify the module was built for THIS exact kernel. MODVERSIONS and
+# MODULE_SIG are disabled in this kernel, so vermagic is the ONLY thing checked
+# at load time — a mismatch (typically a "-dirty" suffix or a drifting commit
+# sha) makes modprobe reject the module with "Invalid module format", the DSI
+# panel never probes, and the screen stays black. Catch it here, not at boot.
+# (modinfo is not present on the device image, so read vermagic directly.)
+KO_VERMAGIC=$(grep -a -o 'vermagic=[^[:cntrl:]]*' "$PATCHED_KO" | head -1 | sed 's/^vermagic=//')
+KO_KREL=${KO_VERMAGIC%% *}
+if [ -z "$KO_KREL" ]; then
+    fail "could not read vermagic from $PATCHED_KO — is it a valid kernel module?"
+fi
+if [ "$KO_KREL" != "$KERNEL_RUNNING" ]; then
+    fail "the .ko was built for kernel '$KO_KREL' but this board runs '$KERNEL_RUNNING'.
+       It would be rejected at load (Invalid module format) and the display would stay black.
+       Download the .ko matching '$KERNEL_RUNNING' from the Release, or rebuild it
+       (tools/dev/build-panel-module.sh). Full vermagic read: '$KO_VERMAGIC'."
+fi
+info "1.0 .ko vermagic matches running kernel: $KO_KREL"
+
 # Back up the original .ko (idempotent)
 if [ ! -f "$KO_BACKUP" ] && [ -f "$KO_TARGET" ]; then
     sudo cp "$KO_TARGET" "$KO_BACKUP"
@@ -199,13 +218,17 @@ info "2.2 Composed DTB: $(stat -c%s "$TMP_OUT") bytes"
 sudo install -m 0644 "$TMP_OUT" "$COMPOSED_DTB"
 info "2.3 Composed DTB installed at $COMPOSED_DTB"
 
-# 2.4 verify the gt911 node is present in the composed DTB (path-agnostic)
-if sudo dtc -I dtb -O dts "$COMPOSED_DTB" 2>/dev/null | grep -qE "compatible[[:space:]]*=[[:space:]]*\"goodix,gt911\""; then
+# 2.4 verify the gt911 + panel nodes are present in the composed DTB
+# (grep the bare quoted compatible string; the previous "compatible =" regex
+# gave false negatives because dtc may render multi-string compatibles or wrap
+# the property differently across versions).
+COMPOSED_DTS=$(sudo dtc -I dtb -O dts "$COMPOSED_DTB" 2>/dev/null)
+if printf '%s' "$COMPOSED_DTS" | grep -q '"goodix,gt911"'; then
     info "    gt911 node OK in composed DTB"
 else
     info "    WARNING: gt911 not found in the composed DTB (inspect manually with dtc -I dtb -O dts $COMPOSED_DTB)"
 fi
-if sudo dtc -I dtb -O dts "$COMPOSED_DTB" 2>/dev/null | grep -qE "compatible[[:space:]]*=[[:space:]]*\"arduino,giga-display\""; then
+if printf '%s' "$COMPOSED_DTS" | grep -q '"arduino,giga-display"'; then
     info "    panel arduino,giga-display OK in composed DTB"
 else
     info "    WARNING: panel arduino,giga-display does not appear in the DTB"

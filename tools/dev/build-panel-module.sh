@@ -166,27 +166,24 @@ fi
 
 section "Build (may take 20-40 min)"
 cp "${BUILD_DIR}/config-${KERNEL_TARGET}" .config
+# Pin the kernel version string so the module's vermagic matches the shipped
+# image EXACTLY. Without this, scripts/setlocalversion appends "-dirty" (the
+# `git apply` above leaves the tree modified) and/or a drifting commit sha,
+# producing a vermagic the running kernel rejects with "Invalid module format".
+printf -- '-g%s\n' "${KERNEL_TARGET##*-g}" > .scmversion
 make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig >/dev/null
 make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j"$(nproc)" 2>&1 | tail -5
 
 KO=drivers/gpu/drm/panel/panel-sitronix-st7701.ko
 [ -f "$KO" ] || fail "build did not produce $KO"
 
-section "Vermagic binary patch"
-NEW_SHA=$(git rev-parse HEAD 2>/dev/null | cut -c1-12 || echo "")
-TARGET_SHA=$(echo "$KERNEL_TARGET" | sed 's/^.*-g//')
-python3 - "$KO" "$NEW_SHA" "$TARGET_SHA" <<'PYEOF'
-import sys
-ko, new_sha, target_sha = sys.argv[1], sys.argv[2], sys.argv[3]
-with open(ko, "rb") as f: data = f.read()
-if new_sha and ("-g" + new_sha).encode() in data:
-    old = ("-g" + new_sha).encode()
-    new = ("-g" + target_sha).encode()
-    if len(old) == len(new):
-        data = data.replace(old, new)
-        print(f"vermagic: -g{new_sha} -> -g{target_sha}")
-with open(ko, "wb") as f: f.write(data)
-PYEOF
+section "Verify vermagic matches the target kernel"
+VM=$(grep -a -o 'vermagic=[^[:cntrl:]]*' "$KO" | head -1)
+EXPECT="vermagic=${KERNEL_TARGET} SMP preempt mod_unload aarch64"
+info "built:    $VM"
+info "expected: $EXPECT"
+[ "$VM" = "$EXPECT" ] || fail "vermagic mismatch — this .ko would be rejected on-device with 'Invalid module format'. A '-dirty' suffix or drifting commit sha is the usual cause; confirm .scmversion was honoured."
+info "vermagic OK"
 
 cp "$KO" "$OUTPUT_KO"
 info "Output: $OUTPUT_KO"
