@@ -167,12 +167,19 @@ fi
 section "Build (may take 20-40 min)"
 cp "${BUILD_DIR}/config-${KERNEL_TARGET}" .config
 # Pin the kernel version string so the module's vermagic matches the shipped
-# image EXACTLY. Without this, scripts/setlocalversion appends "-dirty" (the
-# `git apply` above leaves the tree modified) and/or a drifting commit sha,
-# producing a vermagic the running kernel rejects with "Invalid module format".
-printf -- '-g%s\n' "${KERNEL_TARGET##*-g}" > .scmversion
-make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig >/dev/null
-make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j"$(nproc)" 2>&1 | tail -5
+# image EXACTLY. We force CONFIG_LOCALVERSION to the target's "-g<sha>" and turn
+# CONFIG_LOCALVERSION_AUTO off, taking git fully out of scripts/setlocalversion.
+# Otherwise (AUTO=y) setlocalversion appends "-dirty" — the `git apply` above
+# leaves the tree modified — producing a vermagic the running kernel rejects
+# with "Invalid module format". NOTE: this kernel's setlocalversion was rewritten
+# and no longer reads .scmversion, so that older trick is a no-op here.
+sed -i \
+    -e 's/^CONFIG_LOCALVERSION=.*/CONFIG_LOCALVERSION="-g'"${KERNEL_TARGET##*-g}"'"/' \
+    -e 's/^CONFIG_LOCALVERSION_AUTO=y/# CONFIG_LOCALVERSION_AUTO is not set/' \
+    .config
+# LOCALVERSION= (empty) stops setlocalversion appending a trailing "+" with AUTO=n.
+make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LOCALVERSION= olddefconfig >/dev/null
+make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LOCALVERSION= -j"$(nproc)" 2>&1 | tail -5
 
 KO=drivers/gpu/drm/panel/panel-sitronix-st7701.ko
 [ -f "$KO" ] || fail "build did not produce $KO"
@@ -182,7 +189,7 @@ VM=$(grep -a -o 'vermagic=[^[:cntrl:]]*' "$KO" | head -1)
 EXPECT="vermagic=${KERNEL_TARGET} SMP preempt mod_unload aarch64"
 info "built:    $VM"
 info "expected: $EXPECT"
-[ "$VM" = "$EXPECT" ] || fail "vermagic mismatch — this .ko would be rejected on-device with 'Invalid module format'. A '-dirty' suffix or drifting commit sha is the usual cause; confirm .scmversion was honoured."
+[ "$VM" = "$EXPECT" ] || fail "vermagic mismatch — this .ko would be rejected on-device with 'Invalid module format'. A '-dirty' suffix or drifting commit sha is the usual cause; confirm CONFIG_LOCALVERSION/_AUTO were forced in .config."
 info "vermagic OK"
 
 cp "$KO" "$OUTPUT_KO"

@@ -65,18 +65,22 @@ jobs:
         run: |
           cd kbuild
           # Pin the kernel version string so the module's vermagic matches the
-          # shipped image EXACTLY ("7.0.0-g122c2c22d838"). Without this,
-          # scripts/setlocalversion appends "-dirty" (our `git apply` leaves the
-          # tree modified) and/or a drifting commit sha, producing a vermagic the
-          # running kernel rejects at load time with "Invalid module format".
-          # `.scmversion` is consumed by setlocalversion verbatim and skips git.
-          printf -- '-g%s\n' "${KERNEL_RELEASE##*-g}" > .scmversion
+          # shipped image EXACTLY ("7.0.0-g122c2c22d838"). The config sets
+          # CONFIG_LOCALVERSION="-g122c2c22d838" and CONFIG_LOCALVERSION_AUTO=n,
+          # which takes git fully out of scripts/setlocalversion. (This kernel's
+          # setlocalversion was rewritten and no longer reads .scmversion, so the
+          # old .scmversion trick is a no-op — with LOCALVERSION_AUTO=y it would
+          # still append "-dirty" because `git apply` leaves the tree modified,
+          # producing a vermagic the running kernel rejects with "Invalid module
+          # format".) LOCALVERSION= (empty, exported to the recipe env) stops
+          # setlocalversion from appending a trailing "+" in the AUTO=n branch.
           export PATH="/usr/lib/ccache:$PATH"
           ccache -z
           make -j"$(nproc)" \
             ARCH=arm64 \
             CROSS_COMPILE=aarch64-linux-gnu- \
             CC="ccache aarch64-linux-gnu-gcc" \
+            LOCALVERSION= \
             modules_prepare
           ccache -s
 
@@ -95,6 +99,7 @@ jobs:
             CROSS_COMPILE=aarch64-linux-gnu- \
             CC="ccache aarch64-linux-gnu-gcc" \
             KBUILD_MODPOST_WARN=1 \
+            LOCALVERSION= \
             M=drivers/gpu/drm/panel
           ls -la drivers/gpu/drm/panel/panel-sitronix-st7701.ko
 
